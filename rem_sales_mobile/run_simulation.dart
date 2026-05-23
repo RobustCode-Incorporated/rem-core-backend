@@ -1,32 +1,80 @@
-import 'lib/features/sales/presentation/bloc/sales_bloc.dart';
-import 'lib/features/sales/presentation/pages/sales_pipeline_page.dart';
+import 'dart:async';
+import 'package:http/http.dart' as http;
+import 'lib/features/sales/data/repositories/sales_repository.dart';
+import 'lib/features/sales/data/repositories/client_repository.dart';
 
 void main() async {
   print('==================================================');
   print('🚀 EXÉCUTION DE LA SIMULATION RÉSEAU REM SALES (LIVE)');
   print('==================================================\n');
 
-  final bloc = SalesBloc();
-  final ui = SalesPipelinePage(bloc: bloc);
+  final httpClient = http.Client();
+  final salesRepo = SalesRepository(client: httpClient);
+  final clientRepo = ClientRepository(client: httpClient);
 
-  // Génération de faux UUID valides pour passer la validation stricte de PostgreSQL
-  const String mockClientUuid1 = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
-  const String mockClientUuid2 = 'f6e5d4c3-b2a1-0f9e-8d7c-6b5a4f3e2d1c';
+  try {
+    print('--- 📱 RENDER: REM Sales Dashboard Mobile First ---');
+    print('--------------------------------------------------');
+    print('[Action Mobile] Inscription d\'un nouveau client terrain...');
+    
+    final newClient = await clientRepo.createClient(
+      name: 'Modou Fall',
+      email: 'modou.fall@tech.sn',
+      phone: '+22171234567',
+    );
+    
+    print('[UI SUCCESS] Client créé à la volée ! ID: ${newClient.id}');
+    print('--------------------------------------------------\n');
 
-  // 1. État Initial
-  ui.renderUI();
+    print('[Action Mobile] Tentative de création d\'un Devis de 45,000 XOF...');
+    final quote = await salesRepo.sendDocumentToBackend(
+      clientId: newClient.id,
+      type: 'QUOTE',
+      amount: 45000.0,
+    );
 
-  // 2. Envoi d'un Devis au Backend Node.js avec un UUID Client valide
-  print('[Action Mobile] Tentative de création d\'un Devis de 45,000 XOF...');
-  await bloc.createDocument(mockClientUuid1, 'QUOTE', 45000.00);
-  ui.renderUI();
+    print('--- 📱 RENDER: REM Sales Dashboard Mobile First ---');
+    print('[UI] Affichage du Pipeline de Ventes mis à jour :');
+    print('  -> [${quote.type}] N°${quote.number} | Montant: ${quote.totalAmount} XOF | Statut: ${quote.status}');
+    print('--------------------------------------------------\n');
 
-  // 3. Envoi d\'une Facture au Backend Node.js avec un UUID Client valide
-  print('\n[Action Mobile] Tentative de création d\'une Facture de 120,000 XOF...');
-  await bloc.createDocument(mockClientUuid2, 'INVOICE', 120000.00);
-  ui.renderUI();
+    print('[Action Mobile] Tentative de création d\'une Facture de 120,000 XOF...');
+    final invoice = await salesRepo.sendDocumentToBackend(
+      clientId: newClient.id,
+      type: 'INVOICE',
+      amount: 120000.0,
+    );
 
-  print('==================================================');
-  print('✅ FIN DE LA SIMULATION RÉSEAU END-TO-END');
-  print('==================================================');
+    print('--- 📱 RENDER: REM Sales Dashboard Mobile First ---');
+    print('[UI] Affichage du Pipeline de Ventes mis à jour (Avant Encaissement) :');
+    print('  -> [${invoice.type}] N°${invoice.number} | Montant: ${invoice.totalAmount} XOF | Statut: ${invoice.status}');
+    print('--------------------------------------------------\n');
+
+    // ==================================================
+    // 🎯 INTEGRATION REM-205 : ENCAISSEMENT EN DIRECT
+    // ==================================================
+    print('[Action Mobile] 💵 Client sort le cash ! Traitement de l\'encaissement...');
+    
+    final paymentSuccess = await salesRepo.updateDocumentStatus(
+      documentId: invoice.id, 
+      newStatus: 'PAID',
+    );
+
+    if (paymentSuccess) {
+      print('\n--- 📱 RENDER: REM Sales Dashboard Mobile First ---');
+      print('[UI SUCCESS] 🎉 Paiement validé ! Statut mis à jour en Base de données.');
+      print('  -> [INVOICE] N°${invoice.number} | Montant: ${invoice.totalAmount} XOF | Statut: PAID 🟢');
+    }
+    print('--------------------------------------------------\n');
+
+  } catch (e) {
+    print('--- 📱 RENDER: REM Sales Dashboard Mobile First ---');
+    print('[UI ERROR] Alerte contextuelle: $e');
+    print('--------------------------------------------------\n');
+  } finally {
+    httpClient.close();
+    print('==================================================');
+    print('✅ FIN DE LA SIMULATION RÉSEAU END-TO-END');
+    print('==================================================');
+  }
 }
