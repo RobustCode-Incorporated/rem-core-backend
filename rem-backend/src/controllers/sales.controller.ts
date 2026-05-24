@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '../config/db';
 import pino from 'pino';
+import { SalesModel } from '../models/sales.model';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 
@@ -160,5 +161,48 @@ export const updateDocumentStatus = async (req: Request, res: Response): Promise
   } catch (error) {
     logger.error(error, '[REM SALES ERROR] Échec de la mise à jour du statut');
     res.status(500).json({ error: 'Erreur fatale lors de la modification du statut.' });
+  }
+};
+// ==========================================
+// 4. SYNCHRONISATION OFFLINE-FIRST (MOBILE)
+// ==========================================
+export const syncOfflineDocument = async (req: Request, res: Response): Promise<void> => {
+  const { id, type, number, status, totalAmount } = req.body;
+  const companyId = (req as any).user?.companyId; // Récupération du multi-tenant sécurisé
+
+  logger.info({ companyId, documentId: id, number }, '[REM SALES SYNC] Réception d\'un document synchronisé');
+
+  if (!id || !type || !number || !status || totalAmount === undefined) {
+    res.status(400).json({ error: 'Champs de synchronisation obligatoires manquants.' });
+    return;
+  }
+
+  try {
+    // Appel du modèle mis à jour
+    await SalesModel.syncMobileDocument({
+      id,
+      companyId,
+      type,
+      number,
+      status,
+      totalAmount: Number(totalAmount)
+    });
+
+    logger.info({ documentId: id, number }, '[REM SALES SYNC SUCCESS] Document poussé en base Neon');
+
+    res.status(201).json({
+      success: true,
+      message: 'Document de vente synchronisé avec succès',
+      documentId: id
+    });
+  } catch (error: any) {
+    logger.error(error, '[REM SALES SYNC ERROR] Échec de la synchronisation');
+    
+    if (error.code === '23505') {
+      res.status(409).json({ error: 'Un document avec ce numéro ou cet identifiant existe déjà.' });
+      return;
+    }
+
+    res.status(500).json({ error: 'Erreur fatale lors de la synchronisation en base.' });
   }
 };
