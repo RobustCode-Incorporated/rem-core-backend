@@ -4,6 +4,7 @@ import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'features/sales/data/models/product_model.dart';
 
 // Imports Feature SALES
 import 'features/sales/presentation/bloc/sales_bloc.dart';
@@ -29,7 +30,7 @@ void main() async {
   } else {
     final directory = await getApplicationDocumentsDirectory();
     finalIsar = await Isar.open(
-      [], // Tes schémas si requis
+      [ProductModelSchema], // Tes schémas si requis
       directory: directory.path, 
     );
   }

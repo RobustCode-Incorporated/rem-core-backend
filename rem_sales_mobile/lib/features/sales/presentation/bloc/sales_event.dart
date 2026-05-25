@@ -16,3 +16,13 @@ class SaveDocumentEvent extends SalesEvent {
   @override
   List<Object?> get props => [document];
 }
+
+/// 📦 JALON INVENTORY : Événement pour charger le catalogue d'articles Multi-Tenant depuis Isar DB
+class LoadProductsEvent extends SalesEvent {
+  final String companyId;
+
+  const LoadProductsEvent(this.companyId);
+
+  @override
+  List<Object?> get props => [companyId];
+}

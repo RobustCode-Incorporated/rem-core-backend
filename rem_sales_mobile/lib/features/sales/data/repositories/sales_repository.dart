@@ -1,6 +1,7 @@
 import 'package:isar/isar.dart';
 import 'package:rem_sales_mobile/features/sales/data/models/local_sales_document.dart';
 import 'package:rem_sales_mobile/features/sales/data/models/sales_document_model.dart';
+import 'package:rem_sales_mobile/features/sales/data/models/product_model.dart'; // 📦 AJOUT : Import du modèle de produit
 import 'package:rem_sales_mobile/features/sales/data/datasources/sync_manager.dart';
 
 class SalesRepository {
@@ -47,5 +48,52 @@ class SalesRepository {
 
     // 3. On pousse la mise à jour réseau
     await syncManager.synchronizeDocument(documentId);
+  }
+
+  /// 📦 JALON INVENTORY : Récupérer les produits du catalogue pour une entreprise spécifique (Multi-Tenant)
+  Future<List<ProductModel>> getProductsByCompany(String companyId) async {
+    return await isar.productModels
+        .filter()
+        .companyIdEqualTo(companyId)
+        .findAll();
+  }
+
+  /// 🌱 JALON INVENTORY : Seed Data : Injecter des produits de test si le catalogue local est complètement vide
+  Future<void> seedProductsIfEmpty(String companyId) async {
+    final count = await isar.productModels.count();
+    if (count == 0) {
+      final dummyProducts = [
+        ProductModel(
+          companyId: companyId,
+          name: 'Sac de Ciment 50kg (Génie Civil)',
+          purchasePrice: 3500.0,
+          sellingPrice: 4500.0,
+          stockQuantity: 150,
+          code: 'CIM-50K',
+        ),
+        ProductModel(
+          companyId: companyId,
+          name: 'Fer à béton ø12 (Barre de 12m)',
+          purchasePrice: 4200.0,
+          sellingPrice: 5200.0,
+          stockQuantity: 80,
+          code: 'FER-12MM',
+        ),
+        ProductModel(
+          companyId: companyId,
+          name: 'Pointe de charpente 100mm (Kg)',
+          purchasePrice: 800.0,
+          sellingPrice: 1200.0,
+          stockQuantity: 25,
+          minStockAlert: 5,
+          code: 'PT-100',
+        ),
+      ];
+
+      // Écriture sécurisée dans la transaction Isar
+      await isar.writeTxn(() async {
+        await isar.productModels.putAll(dummyProducts);
+      });
+    }
   }
 }
