@@ -4,6 +4,7 @@ import pino from 'pino';
 import { db } from './config/db';
 import { salesRouter } from './routes/sales.routes';
 import { authRouter } from './routes/auth.routes';
+import { resellerRouter } from './routes/reseller.routes';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
@@ -25,7 +26,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use('/api/sales', salesRouter);
-app.use('/api/auth', authRouter); 
+app.use('/api/auth', authRouter);
+app.use('/api/resellers', resellerRouter); 
 
 // Récupération du catalogue (CORRIGÉ : Ajout de 'currency' dans le SELECT)
 app.get('/api/products', async (req: Request, res: Response): Promise<void> => {

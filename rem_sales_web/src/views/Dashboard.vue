@@ -34,6 +34,7 @@ import { useRouter } from 'vue-router'
 import SalesReconciliation from '../components/SalesReconciliation.vue'
 import InventoryAlerts from '../components/InventoryAlerts.vue'
 import ProductForm from '../components/ProductForm.vue'
+import ResellerForm from '../components/ResellerForm.vue'
 
 const router = useRouter()
 const currentTab = ref('dashboard')
@@ -41,14 +42,16 @@ const currentTab = ref('dashboard')
 const menuItems = [
   { id: 'dashboard', label: 'Tableau de bord' },
   { id: 'inventory', label: 'Suivi Stocks' },
-  { id: 'products', label: 'Articles' }
+  { id: 'products', label: 'Articles' },
+  { id: 'Resellers', label: 'Revendeurs'}
 ]
 
 const activeComponent = computed(() => {
   const components = {
     dashboard: SalesReconciliation,
     inventory: InventoryAlerts,
-    products: ProductForm
+    products: ProductForm,
+    Resellers: ResellerForm
   }
   return components[currentTab.value]
 })
