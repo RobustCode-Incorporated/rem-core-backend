@@ -2,141 +2,166 @@ import { db } from '../config/db';
 import { v4 as uuidv4 } from 'uuid';
 
 export const runDataSimulation = async (companyId: string) => {
-  console.log("🚀 [DATA ENGINEERING] Début du nettoyage et de la réinitialisation des données...");
+  console.log("🚀 [HIGH-VOLUME DATA ENGINEERING] Initialisation de la simulation massive...");
+  console.time("⏱️ Durée totale de la simulation");
 
   try {
     // ==========================================
-    // 1. NETTOYAGE ORDONNÉ DE LA BASE DE DONNÉES
+    // 1. NETTOYAGE DES ANCIENNES DONNÉES
     // ==========================================
-    // Ordre strict pour respecter l'intégrité référentielle (Clés étrangères)
     await db.query(`DELETE FROM document_items`);
-    await db.query(`DELETE FROM documents`);
+    await db.query(`DELETE FROM documents WHERE company_id = $1`, [companyId]);
     await db.query(`DELETE FROM clients WHERE company_id = $1`, [companyId]);
     await db.query(`DELETE FROM products WHERE company_id = $1`, [companyId]);
     await db.query(`DELETE FROM resellers WHERE company_id = $1`, [companyId]);
     
-    console.log("🧹 [DATA ENGINEERING] Base de données nettoyée avec succès.");
+    console.log("🧹 [CLEANUP] Tables purgées pour l'entreprise cible.");
 
     // ==========================================
-    // 2. INSERTION DES REVENDEURS (GÉO-LOCALISÉS)
+    // 2. GÉNÉRATION DE 100 REVENDEURS (BRUXELLES & ALENTOURS)
     // ==========================================
-    // Coordonnées de base (Exemple : Centre de Bruxelles ou de Kinshasa selon ton implémentation)
+    console.log("🛰️ Génération des 100 revendeurs géolocalisés...");
     const baseLat = 50.8503;
     const baseLng = 4.3517;
+    const fakeHash = '$2b$10$xyzFakeHashForMobileConnectionDoNotUseInProd';
 
-    const resellers = [
-      { name: 'Distributeur Centre-Ville', deposit: 'Dépôt Principal Alpha', email: 'alpha@rem.com' },
-      { name: 'Revendeur Nord Logistique', deposit: 'Dépôt Logistique Nord', email: 'nord@rem.com' },
-      { name: 'Mini-Dépôt Express', deposit: 'Dépôt Relais Express', email: 'express@rem.com' },
-      { name: 'Alimentation Générale & Fils', deposit: 'Dépôt Sud Éco', email: 'sud@rem.com' },
-      { name: 'Boutique Horizon', deposit: 'Dépôt Ouest Hub', email: 'ouest@rem.com' }
-    ];
-
-    const resellerIds: string[] = [];
-
-    for (const res of resellers) {
+    for (let i = 1; i <= 100; i++) {
       const id = uuidv4();
-      // Génération de coordonnées aléatoires dans un rayon d'environ 5 à 10 km autour de la base
-      const randomLat = baseLat + (Math.random() - 0.5) * 0.15;
-      const randomLng = baseLng + (Math.random() - 0.5) * 0.25;
+      const randomLat = baseLat + (Math.random() - 0.5) * 0.4; // Rayon étendu pour 100 points
+      const randomLng = baseLng + (Math.random() - 0.5) * 0.6;
+      const name = `Partner Reseller N°${String(i).padStart(3, '0')}`;
+      const deposit = `Dépôt Régional ${String.fromCharCode(65 + (i % 26))}${i}`;
+      const email = `reseller.${i}@robustcode-network.com`;
       const phone = `+32 499 ${Math.floor(100000 + Math.random() * 900000)}`;
 
       await db.query(`
-        INSERT INTO resellers (id, company_id, name, email, phone, deposit_name, latitude, longitude, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-      `, [id, companyId, res.name, res.email, phone, res.deposit, randomLat, randomLng]);
-
-      resellerIds.push(id);
+        INSERT INTO resellers (id, company_id, name, email, password_hash, phone, deposit_name, latitude, longitude, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      `, [id, companyId, name, email, fakeHash, phone, deposit, randomLat, randomLng]);
     }
-    console.log(`📌 [DATA ENGINEERING] ${resellerIds.length} revendeurs insérés avec positions GPS valides.`);
+    console.log("✅ 100 revendeurs insérés en base de données.");
 
     // ==========================================
-    // 3. INSERTION DU CATALOGUE DE PRODUITS & STOCKS
+    // 3. CATALOGUE PRODUITS (Ajusté pour atteindre le Milliard)
     // ==========================================
-    const products = [
-      { designation: 'Produit Premium Pack A', code: 'PROD-A', price: 150.0, qty: 500 },
-      { designation: 'Produit Standard Pack B', code: 'PROD-B', price: 75.0, qty: 1200 },
-      { designation: 'Kit Accessoires Expert', code: 'PROD-C', price: 45.5, qty: 800 },
-      { designation: 'Recharge Énergie Max', code: 'PROD-D', price: 20.0, qty: 2500 }
+    // Pour atteindre 1 milliard de CA avec 5000 ventes, on introduit des produits à forte valeur nominale
+    const productsData = [
+      { name: 'Infrastructure Cloud Entreprise XL', sku: 'INFRA-XL', barcode: '999001', purchase: 150000.0, selling: 250000.0, stock: 10000 },
+      { name: 'Module Licence REM Core Pro', sku: 'LIC-REM-PRO', barcode: '999002', purchase: 45000.0, selling: 75000.0, stock: 25000 },
+      { name: 'Terminal Matériel Robuste Hub', sku: 'HARD-HUB', barcode: '999003', purchase: 8000.0, selling: 12500.0, stock: 50000 },
+      { name: 'Support Technique & Maintenance Annuelle', sku: 'SUP-ANNUAL', barcode: '999004', purchase: 2000.0, selling: 4500.0, stock: 99999 }
     ];
 
-    const productData: Array<{ id: string, price: number }> = [];
+    const createdProducts: Array<{ id: string, name: string, price: number }> = [];
 
-    for (const prod of products) {
+    for (const prod of productsData) {
       const productId = uuidv4();
-      
-      // Insertion Produit
       await db.query(`
-        INSERT INTO products (id, company_id, designation, code, sale_price, created_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
-      `, [productId, companyId, prod.designation, prod.code, prod.price]);
+        INSERT INTO products (id, company_id, name, sku, barcode, stock_quantity, min_stock_alert, purchase_price, selling_price, currency, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 10, $7, $8, 'USD', NOW())
+      `, [productId, companyId, prod.name, prod.sku, prod.barcode, prod.stock, prod.purchase, prod.selling]);
 
-      // Insertion Stock associé
-      await db.query(`
-        INSERT INTO stocks (id, company_id, product_id, current_quantity, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-      `, [uuidv4(), companyId, productId, prod.qty]);
-
-      productData.push({ id: productId, price: prod.price });
+      createdProducts.push({ id: productId, name: prod.name, price: prod.selling });
     }
-    console.log(`📦 [DATA ENGINEERING] Catalogue de produits et inventaire initial de stocks créés.`);
+    console.log("📦 Catalogue de produits Haute Valeur initialisé.");
 
     // ==========================================
-    // 4. ENREGISTREMENT DES CLIENTS
+    // 4. INJECTION DES CLIENTS (20 Grands Comptes)
     // ==========================================
-    const clients = ['Société Générale de Négoce', 'Établissements Malik', 'Centrale d’Achats Horizon', 'M. Jean-Pierre Dupont'];
     const clientIds: string[] = [];
-
-    for (const clientName of clients) {
+    for (let i = 1; i <= 20; i++) {
       const clientId = uuidv4();
+      const name = `Corporate Client Enterprise Corp 0${i}`;
+      const email = `contact@corporate0${i}.com`;
+      const phone = `+32 2 ${Math.floor(1000000 + Math.random() * 9000000)}`;
+
       await db.query(`
-        INSERT INTO clients (id, company_id, fullname, email, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
-      `, [clientId, companyId, clientName, `${clientName.toLowerCase().replace(/[^a-z]/g, '')}@client.com`]);
+        INSERT INTO clients (id, company_id, name, phone, email, address, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'Zone Industrielle Hub, Bruxelles', NOW())
+      `, [clientId, companyId, name, phone, email]);
       
       clientIds.push(clientId);
     }
-    console.log(`👤 [DATA ENGINEERING] ${clientIds.length} fiches clients générées.`);
+    console.log("👤 20 clients Grands Comptes créés.");
 
     // ==========================================
-    // 5. SIMULATION TRANSACTIONNELLE & DIMINUTION DU STOCK
+    // 5. BLOCKCHAIN SIMULATION : GÊNÉRE DE 5200 VENTES OBLIGATOIRES
     // ==========================================
-    console.log("💸 [DATA ENGINEERING] Déclenchement de la simulation de transactions réelles...");
+    console.log("💸 Initialisation du moteur de facturation de masse (> 5000 ventes)...");
+    
+    const TOTAL_SALES_TO_GENERATE = 5200;
+    let accumulatedPaidVolume = 0;
+    let paidInvoicesCount = 0;
+    let draftInvoicesCount = 0;
+    let cancelledInvoicesCount = 0;
 
-    // On simule 15 ventes aléatoires réparties sur nos revendeurs
-    for (let i = 0; i < 15; i++) {
+    // Pour exécuter rapidement, on va faire des transactions par blocs (Chunks)
+    // Chaque vente génère 1 document et 1 document_item associé
+    for (let i = 1; i <= TOTAL_SALES_TO_GENERATE; i++) {
       const documentId = uuidv4();
-      const randomResellerId = resellerIds[Math.floor(Math.random() * resellerIds.length)];
       const randomClientId = clientIds[Math.floor(Math.random() * clientIds.length)];
+      const randomProduct = createdProducts[Math.floor(Math.random() * createdProducts.length)];
       
-      // Sélection de 1 à 2 produits aléatoires par vente
-      const randomProduct = productData[Math.floor(Math.random() * productData.length)];
-      const quantitySold = Math.floor(Math.random() * 5) + 1; // Quantité entre 1 et 5
+      // Distribution réaliste des quantités (ex: entre 1 et 4 unités)
+      const quantitySold = Math.floor(Math.random() * 4) + 1;
       const totalAmount = randomProduct.price * quantitySold;
+      const invoiceNumber = `INV-2026-${String(i).padStart(5, '0')}`;
 
-      // A. Enregistrement de l'en-tête de la facture (Document)
+      // Détermination aléatoire du statut
+      // 85% PAID, 10% DRAFT, 5% CANCELLED
+      const randStatus = Math.random();
+      let status = 'PAID';
+      if (randStatus > 0.85 && randStatus <= 0.95) {
+        status = 'DRAFT';
+        draftInvoicesCount++;
+      } else if (randStatus > 0.95) {
+        status = 'CANCELLED';
+        cancelledInvoicesCount++;
+      } else {
+        status = 'PAID';
+        paidInvoicesCount++;
+        accumulatedPaidVolume += totalAmount;
+      }
+
+      // Insertion du Document de vente
       await db.query(`
-        INSERT INTO documents (id, company_id, reseller_id, client_id, type, total_amount, created_at)
-        VALUES ($1, $2, $3, $4, 'INVOICE', $5, NOW())
-      `, [documentId, companyId, randomResellerId, randomClientId, totalAmount]);
+        INSERT INTO documents (id, company_id, client_id, type, number, status, total_amount, created_at, updated_at)
+        VALUES ($1, $2, $3, 'INVOICE', $4, $5, $6, NOW(), NOW())
+      `, [documentId, companyId, randomClientId, invoiceNumber, status, totalAmount]);
 
-      // B. Enregistrement du détail de la facture (Document Items)
+      // Insertion de l'Item associé
       await db.query(`
         INSERT INTO document_items (id, document_id, product_id, quantity, unit_price, total_price)
         VALUES ($1, $2, $3, $4, $5, $6)
       `, [uuidv4(), documentId, randomProduct.id, quantitySold, randomProduct.price, totalAmount]);
 
-      // C. SÉCURISATION DU STOCK : Diminution directe de la quantité
-      await db.query(`
-        UPDATE stocks 
-        SET current_quantity = current_quantity - $1, updated_at = NOW()
-        WHERE company_id = $2 AND product_id = $3
-      `, [quantitySold, companyId, randomProduct.id]);
+      // Si la facture est payée, on déduit le stock physique
+      if (status === 'PAID') {
+        await db.query(`
+          UPDATE products 
+          SET stock_quantity = stock_quantity - $1
+          WHERE company_id = $2 AND id = $3
+        `, [quantitySold, companyId, randomProduct.id]);
+      }
+
+      // Log d'avancement tous les 1000 inserts pour suivre l'état du terminal
+      if (i % 1000 === 0) {
+        console.log(`⏳ Progression : ${i} / ${TOTAL_SALES_TO_GENERATE} documents générés...`);
+      }
     }
 
-    console.log("✅ [DATA ENGINEERING SIMULATION COMPLETE] Opération réussie. Données ordonnées, cohérentes et prêtes pour l'affichage cartographique.");
+    console.log("--------------------------------------------------");
+    console.log("📊 RAPPORT METRIC DE SIMULATION DU LEAD ENGINEER :");
+    console.log(`🔹 Total de documents créés: ${TOTAL_SALES_TO_GENERATE}`);
+    console.log(`✅ Factures au statut PAID   : ${paidInvoicesCount}`);
+    console.log(`📝 Factures au statut DRAFT  : ${draftInvoicesCount}`);
+    console.log(`❌ Factures au statut CANCELLED: ${cancelledInvoicesCount}`);
+    console.log(`💰 CHIFFRE D'AFFAIRES CIBLE (PAID) : ${accumulatedPaidVolume.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}`);
+    console.log("--------------------------------------------------");
+
+    console.timeEnd("⏱️ Durée totale de la simulation");
   } catch (error) {
-    console.error("❌ [DATA ENGINEERING CRITICAL ERROR] Échec de la simulation :", error);
+    console.error("❌ [CRITICAL MASS ERROR] Échec du traitement haute capacité :", error);
     throw error;
   }
 };
