@@ -57,6 +57,26 @@
         </div>
       </div>
 
+      <div class="chart-box clean-chart">
+        <h3>Parts du CA par Catégorie de Produit</h3>
+        <div v-if="categoryData.series.length > 0" class="chart-render-zone">
+          <apexchart type="donut" :options="donutOptionsCategory" :series="categoryData.series"></apexchart>
+        </div>
+        <div v-else class="empty-chart-fallback">
+          <p>📊 Aucune donnée de produit catégorisée</p>
+        </div>
+      </div>
+
+      <div class="chart-box clean-chart">
+        <h3>Top Performance des Revendeurs (CA)</h3>
+        <div v-if="resellerPerformanceData.series.length > 0" class="chart-render-zone">
+          <apexchart type="donut" :options="donutOptionsResellerPerf" :series="resellerPerformanceData.series"></apexchart>
+        </div>
+        <div v-else class="empty-chart-fallback">
+          <p>👥 Aucun CA rattaché à un revendeur actif</p>
+        </div>
+      </div>
+
       <div class="chart-box clean-chart full-width-chart">
         <h3>Évolution Temporelle des Flux Globaux</h3>
         <apexchart type="area" :options="lineOptions" :series="lineData.series"></apexchart>
@@ -82,7 +102,6 @@ onMounted(() => {
 
 // --- 📊 CALCULS KPI FINANCIERS ---
 
-// CA Ventes Directes du Dépôt = Factures de type 'RESTOCK' validées (PAID / COMPLETED)
 const revenueDirect = computed(() => {
   return salesStore.sales
     .filter(s => {
@@ -98,7 +117,6 @@ const revenueDirect = computed(() => {
     .reduce((sum, s) => sum + Number(s.total_amount || 0), 0)
 })
 
-// CA Revendeurs = Documents de vente liés à un agent/revendeur
 const revenueResellers = computed(() => {
   return salesStore.sales
     .filter(s => {
@@ -114,67 +132,106 @@ const revenueResellers = computed(() => {
     .reduce((sum, s) => sum + Number(s.total_amount || 0), 0)
 })
 
-// Panier Moyen Réel
 const averageBasket = computed(() => {
   const totalPaidSales = salesStore.sales.filter(s => 
-    ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status).toUpperCase())
+    ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase())
   ).length;
   const globalRevenue = revenueDirect.value + revenueResellers.value;
   return totalPaidSales ? globalRevenue / totalPaidSales : 0;
 })
 
 
-// --- 🍩 CONFIGURATION DYNAMIQUE DES DONUTS SÉPARÉS ---
+// --- 🍩 CONFIGURATION DYNAMIQUE DES DONUTS ---
 
-// Donut 1 : Analyse des flux RESTOCK (Avec tolérance accrue sur les statuts d'attente)
+// Donut 1 : Flux RESTOCK
 const restockSeries = computed(() => {
   const restocks = salesStore.sales.filter(s => {
     const type = String(s.type || '').toUpperCase();
     return type.includes('RESTOCK') || type.includes('STOCK');
   });
-
-  // Filtrage des différents états avec tolérance de vocabulaire API
-  const paidCount = restocks.filter(s => ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase())).length;
-  
-  // Prise en compte de 'DRAFT', 'PENDING', 'BROUILLON' et 'PROCESSING' pour les brouillons/attentes
-  const draftCount = restocks.filter(s => ['DRAFT', 'BROUILLON', 'PENDING', 'PROCESSING', 'EN_ATTENTE'].includes(String(s.status || '').toUpperCase())).length;
-  
-  const cancelledCount = restocks.filter(s => ['CANCELLED', 'ANNULÉ', 'ANNULE', 'REJECTED'].includes(String(s.status || '').toUpperCase())).length;
-  
-  // LOG DE SÉCURITÉ STATUTS RESTOCK
-  if (restocks.length > 0) {
-    console.log(`📊 [REM RESTOCK STATUTS] Total Restocks: ${restocks.length} | Validés: ${paidCount} | En attente/Draft: ${draftCount} | Annulés: ${cancelledCount}`);
-    console.log(`📊 [REM RESTOCK STATUTS] Échantillon de statuts trouvés dans vos données :`, restocks.map(r => r.status));
-  }
-
-  return [paidCount, draftCount, cancelledCount];
+  const paid = restocks.filter(s => ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase())).length;
+  const draft = restocks.filter(s => ['DRAFT', 'BROUILLON', 'PENDING', 'PROCESSING', 'EN_ATTENTE'].includes(String(s.status || '').toUpperCase())).length;
+  const cancelled = restocks.filter(s => ['CANCELLED', 'ANNULÉ', 'ANNULE', 'REJECTED'].includes(String(s.status || '').toUpperCase())).length;
+  return [paid, draft, cancelled];
 })
 
-// Donut 2 : Analyse exclusive des flux SALES / VENTES
+// Donut 2 : Flux SALES / VENTES
 const salesSeries = computed(() => {
   const sales = salesStore.sales.filter(s => ['SALE', 'VENTE', 'FACTURE'].includes(String(s.type || '').toUpperCase()))
-  
   const paid = sales.filter(s => ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase())).length
   const draft = sales.filter(s => ['DRAFT', 'BROUILLON', 'PENDING'].includes(String(s.status || '').toUpperCase())).length
   const cancelled = sales.filter(s => ['CANCELLED', 'ANNULÉ', 'ANNULE'].includes(String(s.status || '').toUpperCase())).length
-  
   return [paid, draft, cancelled]
 })
 
-// Sécurités de données pour bloquer le crash d'ApexCharts si tableaux vides [0, 0, 0]
+// Donut 3 : REPARTITION CA PAR CATEGORIE (Logique d'extraction automatique)
+const categoryData = computed(() => {
+  const map = {};
+  salesStore.sales
+    .filter(s => ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase()))
+    .forEach(s => {
+      // Extraction adaptative du nom de la catégorie (ajustez le fallback selon votre backend)
+      const cat = s.product_category || s.category || s.details?.category || 'Général';
+      map[cat] = (map[cat] || 0) + Number(s.total_amount || 0);
+    });
+  return {
+    labels: Object.keys(map),
+    series: Object.values(map)
+  };
+})
+
+// Donut 4 : TOP 5 REVENDEURS + CLASSIFICATION "AUTRES"
+const resellerPerformanceData = computed(() => {
+  const map = {};
+  salesStore.sales
+    .filter(s => ['PAID', 'COMPLETED', 'PAYÉ', 'PAYE'].includes(String(s.status || '').toUpperCase()) && (s.reseller_name || s.reseller_id))
+    .forEach(s => {
+      const name = s.reseller_name || `Agent #${s.reseller_id}`;
+      map[name] = (map[name] || 0) + Number(s.total_amount || 0);
+    });
+
+  // Tri décroissant pour isoler les leaders
+  const sorted = Object.entries(map).sort((a, b) => b[1] - a[1]);
+  const top5 = sorted.slice(0, 5);
+  const others = sorted.slice(5);
+
+  const labels = top5.map(item => item[0]);
+  const series = top5.map(item => item[1]);
+
+  if (others.length > 0) {
+    labels.push('Autres Revendeurs');
+    series.push(others.reduce((sum, item) => sum + item[1], 0));
+  }
+
+  return { labels, series };
+})
+
 const hasRestockData = computed(() => restockSeries.value.reduce((a, b) => a + b, 0) > 0)
 const hasSalesData = computed(() => salesSeries.value.reduce((a, b) => a + b, 0) > 0)
 
-// Configuration esthétique standard épurée (Pas de fond noir forcé)
+// Configuration visuelle épurée globale
 const baseDonutOptions = {
-  colors: ['#10b981', '#f59e0b', '#ef4444'], // Vert (Validé), Orange (En attente/Draft), Rouge (Annulé)
   stroke: { colors: ['#ffffff'], width: 2 },
   legend: { position: 'bottom', labels: { colors: '#111111' }, fontFamily: 'system-ui, sans-serif' },
   chart: { background: 'transparent' }
 }
 
-const donutOptionsRestock = { ...baseDonutOptions, labels: ['Restocks Validés', 'En attente / Draft', 'Annulés'] }
-const donutOptionsSales = { ...baseDonutOptions, labels: ['Payées', 'Brouillons', 'Annulées'] }
+const donutOptionsRestock = { ...baseDonutOptions, colors: ['#10b981', '#f59e0b', '#ef4444'], labels: ['Restocks Validés', 'En attente / Draft', 'Annulés'] }
+const donutOptionsSales = { ...baseDonutOptions, colors: ['#10b981', '#f59e0b', '#ef4444'], labels: ['Payées', 'Brouillons', 'Annulées'] }
+
+// Options personnalisées pour les catégories (Palette de couleurs distinctes)
+const donutOptionsCategory = computed(() => ({
+  ...baseDonutOptions,
+  colors: ['#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b', '#6b7280'],
+  labels: categoryData.value.labels
+}))
+
+// Options personnalisées pour les revendeurs (Dégradés de bleu/cyan pro)
+const donutOptionsResellerPerf = computed(() => ({
+  ...baseDonutOptions,
+  colors: ['#1e3a8a', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#cbd5e1'],
+  labels: resellerPerformanceData.value.labels
+}))
 
 
 // --- 📈 SUIVI CHRONOLOGIQUE DYNAMIQUE ---
@@ -203,10 +260,7 @@ const lineData = computed(() => {
     return { series: [{ name: 'Volume de ventes ($)', data: [0] }], categories: ['Aucun flux'] };
   }
 
-  return {
-    series: [{ name: 'Volume global consolidé ($)', data }],
-    categories
-  };
+  return { series: [{ name: 'Volume global consolidé ($)', data }], categories };
 })
 
 const lineOptions = computed(() => ({
@@ -217,10 +271,7 @@ const lineOptions = computed(() => ({
     type: 'gradient',
     gradient: { shadeIntensity: 1, opacityFrom: 0.15, opacityTo: 0, stops: [0, 90, 100] }
   },
-  xaxis: { 
-    categories: lineData.value.categories,
-    labels: { style: { colors: '#666666' } }
-  },
+  xaxis: { categories: lineData.value.categories, labels: { style: { colors: '#666666' } } },
   yaxis: { labels: { style: { colors: '#666666' } } }
 }))
 </script>
@@ -247,9 +298,7 @@ const lineOptions = computed(() => ({
   margin: 0;
 }
 
-.card-section-container {
-  width: 100%;
-}
+.card-section-container { width: 100%; }
 
 .metrics-grid {
   display: grid;
@@ -268,25 +317,12 @@ const lineOptions = computed(() => ({
   gap: 8px;
 }
 
-.card-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  color: #888888;
-  letter-spacing: 0.8px;
-  font-weight: 600;
-}
-.card-number {
-  font-size: 1.8rem;
-  font-weight: 700;
-  margin: 0;
-}
+.card-label { font-size: 0.72rem; text-transform: uppercase; color: #888888; letter-spacing: 0.8px; font-weight: 600; }
+.card-number { font-size: 1.8rem; font-weight: 700; margin: 0; }
 .total-direct { color: #ffffff; }
 .total-reseller { color: #3b82f6; } 
 
-.card-status {
-  font-size: 0.72rem;
-  font-weight: bold;
-}
+.card-status { font-size: 0.72rem; font-weight: bold; }
 .card-status.status-up { color: #10b981; }
 .card-status.status-reseller { color: #3b82f6; }
 .card-status.status-sync { color: #a855f7; }
@@ -328,13 +364,9 @@ const lineOptions = computed(() => ({
   background: #fafafa;
 }
 
-.full-width-chart {
-  grid-column: 1 / -1;
-}
+.full-width-chart { grid-column: 1 / -1; }
 
 @media (max-width: 768px) {
-  .charts-grid {
-    grid-template-columns: 1fr;
-  }
+  .charts-grid { grid-template-columns: 1fr; }
 }
 </style>
