@@ -38,7 +38,7 @@
       </div>
       
       <div v-else-if="salesList.length === 0" class="state-feedback empty-state">
-        ⚠️ Aucune vente ne correspond à vos critères de recherche.
+        ⚠️ Aucune transaction ne correspond à vos critères de recherche.
       </div>
 
       <table v-else class="sales-table">
@@ -97,7 +97,7 @@
           <a :href="emailLink" class="btn-action-email">✉️ Email</a>
           
           <button 
-            v-if="selectedInvoice.status === 'DRAFT'" 
+            v-if="selectedInvoice.status === 'DRAFT' && userRole !== 'STAFF'" 
             @click="handleCollectPayment(selectedInvoice.id)" 
             class="btn-action-collect"
           >
@@ -105,7 +105,7 @@
           </button>
           
           <button 
-            v-if="selectedInvoice.status === 'DRAFT' || selectedInvoice.status === 'PAID'" 
+            v-if="(selectedInvoice.status === 'DRAFT' || selectedInvoice.status === 'PAID') && userRole !== 'STAFF'" 
             @click="handleCancelInvoice(selectedInvoice.id)" 
             class="btn-action-cancel-invoice"
           >
@@ -195,13 +195,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
-import { useSalesStore } from '../stores/sales' // 📦 Importation de ton store mis à jour
+import { useSalesStore } from '../stores/sales'
 
 import logoRobustCode from '../assets/RobustCodelogowhite.png'
 
+// ⚡ Définition des propriétés d'injection pour le filtrage par contexte d'onglet
+const props = defineProps({
+  defaultType: {
+    type: String,
+    default: '' // 'SALE' ou 'RESTOCK_REQUEST' ou vide pour tout charger
+  }
+})
+
 const salesStore = useSalesStore()
+
+// 🛡️ Récupération dynamique et réactive du rôle utilisateur depuis le stockage local
+const userRole = computed(() => localStorage.getItem('userRole') || '')
 
 const salesList = ref([])
 const metaData = ref(null)
@@ -215,6 +226,12 @@ let debounceTimeout = null
 const isModalOpen = ref(false)
 const selectedInvoice = ref(null)
 const selectedInvoiceItems = ref([])
+
+// 🔄 Forcer la réinitialisation de la pagination et le rechargement si l'onglet change
+watch(() => props.defaultType, () => {
+  currentPage.value = 1
+  fetchPaginatingSales()
+})
 
 const fetchPaginatingSales = async () => {
   loading.value = true
@@ -230,10 +247,20 @@ const fetchPaginatingSales = async () => {
         limit: 15,
         search: searchQuery.value,
         status: selectedStatus.value,
-        company_id: companyId
+        company_id: companyId,
+        type: props.defaultType || undefined // Envoi du filtre type à l'API
       }
     })
-    salesList.value = response.data.data
+
+    const rawData = response.data.data || response.data
+    
+    // Double sécurité : Filtrage côté client si l'API ne supporte pas le paramètre type
+    if (props.defaultType) {
+      salesList.value = rawData.filter(d => d.type === props.defaultType)
+    } else {
+      salesList.value = rawData
+    }
+
     metaData.value = response.data.meta
   } catch (error) {
     console.error("❌ [UX ERROR] Échec de la récupération des ventes paginées:", error)
@@ -355,11 +382,9 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Tags stylisés pour inclure le nom du dépôt proprement */
 .depot-tag { font-weight: normal; font-size: 0.8rem; color: #64748b; font-style: italic; margin-left: 6px; }
 .depot-tag-modal { font-weight: normal; font-size: 0.95rem; color: #64748b; font-style: italic; margin-left: 6px; }
 
-/* Styles du composant */
 .sales-module-container { background: #fff; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .filter-zone { border: 1px solid #cbd5e1; border-radius: 6px; padding: 16px; margin-bottom: 20px; }
 .filter-zone legend { font-size: 0.8rem; font-weight: bold; text-transform: uppercase; padding: 0 8px; }
@@ -413,7 +438,6 @@ onMounted(() => {
 .btn-action-email { background: #64748b; color: white; }
 .btn-action-email:hover { background: #475569; }
 
-/* 🎨 NOUVEAUX STYLES APPLIQUÉS AUX BOUTONS GESTIONNAIRES */
 .btn-action-collect { background: #10b981; color: white; }
 .btn-action-collect:hover { background: #059669; }
 .btn-action-cancel-invoice { background: #f97316; color: white; }

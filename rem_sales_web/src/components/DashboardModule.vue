@@ -1,115 +1,147 @@
 <template>
-  <div class="restock-container">
-    <div class="header-section">
-      <h2>Mon Inventaire & Réapprovisionnement</h2>
-      <button @click="fetchStocks" class="refresh-btn">Actualiser</button>
+  <div class="dashboard-module">
+    <!-- Section Cartes / KPIs -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <h3>Ventes du Jour</h3>
+        <p class="metric-value">{{ todaySalesTotal.toLocaleString() }} $</p>
+      </div>
+      <div class="metric-card">
+        <h3>Commandes en attente</h3>
+        <p class="metric-value">{{ pendingOrdersCount }}</p>
+      </div>
+      <div class="metric-card">
+        <h3>Articles distincts en Stock</h3>
+        <p class="metric-value">{{ stockList.length }}</p>
+      </div>
     </div>
-    
-    <div v-if="loading" class="loader">Chargement...</div>
 
-    <table v-else class="stock-table">
-      <thead>
-        <tr>
-          <th>Produit</th>
-          <th>Stock Actuel</th>
-          <th>Seuil Critique</th>
-          <th>Commander</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="item in stocks" :key="item.product_id">
-          <td>{{ item.product_name }}</td>
-          <td :class="{'critical': item.quantity <= item.min_threshold}">
-            {{ item.quantity }}
-          </td>
-          <td>{{ item.min_threshold }}</td>
-          <td>
-            <input 
-              type="number" 
-              v-model.number="orderQtys[item.product_id]" 
-              placeholder="0" 
-              class="qty-input"
-              min="0"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- 📦 NOUVEAU : L'inventaire réel disponible au magasin du revendeur -->
+    <div class="inventory-section">
+      <div class="section-header">
+        <h2>📦 Mon Inventaire Magasin (Stocks Disponibles)</h2>
+        <button @click="fetchResellerStock" class="refresh-btn">🔄 Actualiser</button>
+      </div>
 
-    <button 
-      @click="submitRestock" 
-      class="btn-order" 
-      :disabled="isSubmitting"
-    >
-      {{ isSubmitting ? 'Envoi...' : 'Passer la commande' }}
-    </button>
+      <div v-if="stockLoading" class="loading-feedback">
+        Analyse et synchronisation du stock magasin en cours...
+      </div>
+
+      <div v-else-if="stockList.length === 0" class="empty-stock-feedback">
+        ⚠️ Aucun article en stock. Passez un bon de commande (Restock) pour alimenter votre dépôt.
+      </div>
+
+      <table v-else class="inventory-table">
+        <thead>
+          <tr>
+            <th>ID Produit</th>
+            <th>Désignation du Produit</th>
+            <th class="text-center">Quantité Physique Dispo</th>
+            <th>Statut Alerte</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in stockList" :key="item.product_id">
+            <td class="font-mono font-bold">{{ item.product_id?.slice(0, 8) }}...</td>
+            <td class="font-bold">{{ item.product_name || 'Produit REM' }}</td>
+            <td class="text-center font-bold" :class="{ 'low-stock': item.quantity <= 5 }">
+              {{ item.quantity }} pces
+            </td>
+            <td>
+              <span v-if="item.quantity === 0" class="stock-badge out">Rupture</span>
+              <span v-else-if="item.quantity <= 5" class="stock-badge alert">Alerte Seuil</span>
+              <span v-else class="stock-badge ok">Optimal</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import axios from 'axios';
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
 
-const stocks = ref([]);
-const orderQtys = ref({});
-const loading = ref(false);
-const isSubmitting = ref(false);
+const todaySalesTotal = ref(0)
+const pendingOrdersCount = ref(0)
 
-// 1. Charger les stocks
-const fetchStocks = async () => {
-  loading.value = true;
+const stockList = ref([])
+const stockLoading = ref(false)
+
+// 📥 Récupération du stock attribué au revendeur
+const fetchResellerStock = async () => {
+  stockLoading.value = true
   try {
-    const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/resellers/my-stock`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    stocks.value = res.data.data;
-  } catch (err) { 
-    console.error("Erreur chargement stock", err);
-    alert("Impossible de charger l'inventaire.");
+    const token = localStorage.getItem('token')
+    // Route adaptative ou fallback dynamique
+    const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/resellers/me/stock`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    // Ajustement selon la structure de ta réponse BDD
+    stockList.value = response.data.data || response.data
+  } catch (error) {
+    console.error("❌ Erreur lors du chargement de l'inventaire revendeur :", error)
   } finally {
-    loading.value = false;
+    stockLoading.value = false
   }
-};
+}
 
-// 2. Soumettre la commande
-const submitRestock = async () => {
-  const items = Object.entries(orderQtys.value)
-    .filter(([_, qty]) => qty > 0)
-    .map(([product_id, quantity]) => ({ product_id, quantity }));
-
-  if (items.length === 0) return alert("Veuillez saisir une quantité pour au moins un produit.");
-
-  isSubmitting.value = true;
+// Extraction rapide des KPIs vitaux
+const fetchKpis = async () => {
   try {
-    await axios.post(`${import.meta.env.VITE_API_BASE_URL}/resellers/restock-request`, 
-      { items },
-      { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-    );
+    const token = localStorage.getItem('token')
+    const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/sales/documents`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { limit: 100 }
+    })
+    const docs = response.data.data || response.data
     
-    alert("Demande de réapprovisionnement transmise avec succès !");
-    orderQtys.value = {}; // Reset du formulaire
-    fetchStocks();       // Recharger les données
-  } catch (err) { 
-    console.error(err);
-    alert("Échec de l'envoi de la commande."); 
-  } finally {
-    isSubmitting.value = false;
+    // Calculs de surface réactifs
+    if (Array.isArray(docs)) {
+      pendingOrdersCount.value = docs.filter(d => d.type === 'RESTOCK_REQUEST' && d.status === 'DRAFT').length
+      todaySalesTotal.value = docs
+        .filter(d => d.status === 'PAID' && d.type === 'SALE')
+        .reduce((acc, curr) => acc + Number(curr.total_amount), 0)
+    }
+  } catch (err) {
+    console.error("Impossible de rafraîchir les KPIs", err)
   }
-};
+}
 
-onMounted(fetchStocks);
+onMounted(() => {
+  fetchKpis()
+  fetchResellerStock()
+})
 </script>
 
 <style scoped>
-.restock-container { padding: 30px; background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-.header-section { display: flex; justify-content: space-between; align-items: center; }
-.stock-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-.stock-table th { text-align: left; color: #666; padding: 15px; border-bottom: 2px solid #eee; }
-.stock-table td { padding: 15px; border-bottom: 1px solid #eee; }
-.critical { color: #d9534f; font-weight: bold; }
-.qty-input { width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-.btn-order { margin-top: 25px; padding: 12px 25px; background: #000; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: 0.3s; }
-.btn-order:disabled { background: #ccc; cursor: not-allowed; }
-.btn-order:hover:not(:disabled) { background: #333; }
-.refresh-btn { background: #f0f0f0; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; }
+.dashboard-module { display: flex; flex-direction: column; gap: 30px; }
+.metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.metric-card { background: #000; color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.metric-card h3 { margin: 0 0 10px 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: #A0A0A0; }
+.metric-value { margin: 0; font-size: 1.8rem; font-weight: bold; }
+
+/* Styles Section Inventaire */
+.inventory-section { background: #ffffff; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0; }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.section-header h2 { font-size: 1.1rem; margin: 0; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
+.refresh-btn { background: #000; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
+
+.loading-feedback, .empty-stock-feedback { padding: 30px; text-align: center; color: #64748b; font-style: italic; font-size: 0.9rem; }
+
+.inventory-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+.inventory-table th { background: #f8fafc; color: #475569; font-weight: 600; padding: 12px; border-bottom: 2px solid #e2e8f0; }
+.inventory-table td { padding: 12px; border-bottom: 1px solid #edf2f7; color: #1e293b; }
+
+.font-mono { font-family: monospace; }
+.font-bold { font-weight: bold; }
+.text-center { text-align: center; }
+
+.low-stock { color: #ef4444; background: #fee2e2; padding: 4px; border-radius: 4px; }
+
+.stock-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; text-transform: uppercase; }
+.stock-badge.ok { background: #d1fae5; color: #065f46; }
+.stock-badge.alert { background: #fef3c7; color: #92400e; }
+.stock-badge.out { background: #fee2e2; color: #991b1b; }
 </style>

@@ -28,6 +28,107 @@ const updateInventory = async (client: any, productId: string, quantity: number,
 };
 
 // ==========================================
+// NEW: ENCAISSEMENT DIRECT CAISSE / VENTE AU DÉTAIL (QuickSale)
+// ==========================================
+export const processRetailCheckout = async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user; // Le revendeur connecté (STAFF)
+  const { client, items } = req.body;
+
+  if (!client || !client.name || !items || items.length === 0) {
+    res.status(400).json({ success: false, message: "Données de vente incomplètes." });
+    return;
+  }
+
+  logger.info({ resellerId: user?.id, companyId: client.company_id }, `[REM CAISSE] Début de transaction vente directe au détail.`);
+
+  try {
+    await db.query('BEGIN');
+
+    // 1. Upsert Client (recherche par nom si existant pour cette entreprise)
+    let clientId: string;
+    const checkClient = await db.query(
+      `SELECT id FROM public.clients WHERE name = $1 AND company_id = $2 LIMIT 1`,
+      [client.name, client.company_id]
+    );
+
+    if (checkClient.rows.length > 0) {
+      clientId = checkClient.rows[0].id;
+      logger.info({ clientId }, `[REM CAISSE] Client existant identifié.`);
+    } else {
+      const insertClient = await db.query(
+        `INSERT INTO public.clients (company_id, name, phone, email, address)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [client.company_id, client.name, client.phone, client.email, client.address]
+      );
+      clientId = insertClient.rows[0].id;
+      logger.info({ clientId }, `[REM CAISSE] Nouveau profil client créé à la volée.`);
+    }
+
+    // Génération du numéro de facture unique pour la caisse
+    const docNumber = `CASH-${Date.now().toString().slice(-6)}`;
+
+    // 2. Création de la FACTURE (Type SALE, payé immédiatement à la caisse)
+    const documentQuery = `
+      INSERT INTO public.documents (company_id, reseller_id, client_id, type, number, status, total_amount)
+      VALUES ($1, $2, $3, 'SALE', $4, 'PAID', 0)
+      RETURNING id;
+    `;
+    const docRes = await db.query(documentQuery, [client.company_id, user.id, clientId, docNumber]);
+    const documentId = docRes.rows[0].id;
+
+    let globalTotalAmount = 0;
+
+    // 3. Boucle de validation et déduction de stock par produit
+    for (const item of items) {
+      // Vérification et verrouillage (FOR UPDATE) du stock pour éviter les conditions de concurrence
+      const stockCheck = await db.query(
+        `SELECT quantity FROM public.reseller_stocks 
+         WHERE reseller_id = $1 AND product_id = $2 FOR UPDATE`,
+        [user.id, item.product_id]
+      );
+
+      if (stockCheck.rows.length === 0 || stockCheck.rows[0].quantity < item.quantity) {
+        throw new Error(`Stock insuffisant au dépôt pour le produit sélectionné.`);
+      }
+
+      // Soustraction du stock réel du revendeur
+      await db.query(
+        `UPDATE public.reseller_stocks 
+         SET quantity = quantity - $1, updated_at = NOW()
+         WHERE reseller_id = $2 AND product_id = $3`,
+        [item.quantity, user.id, item.product_id]
+      );
+
+      // Récupération stricte du prix (selling_price) configuré sur la marchandise centrale
+      const priceRes = await db.query(`SELECT selling_price FROM public.products WHERE id = $1`, [item.product_id]);
+      const unitPrice = Number(priceRes.rows[0]?.selling_price || 0);
+      const itemTotal = unitPrice * item.quantity;
+      globalTotalAmount += itemTotal;
+
+      // Liaison à la facture détail (document_items)
+      await db.query(
+        `INSERT INTO public.document_items (document_id, product_id, quantity, unit_price, total_price)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [documentId, item.product_id, item.quantity, unitPrice, itemTotal]
+      );
+    }
+
+    // Mise à jour finale du montant total réel cumulé de la vente directe
+    await db.query(`UPDATE public.documents SET total_amount = $1 WHERE id = $2`, [globalTotalAmount, documentId]);
+
+    await db.query('COMMIT');
+    logger.info({ documentId, docNumber, total: globalTotalAmount }, `[REM CAISSE SUCCESS] Vente au détail encaissée et stock déduit.`);
+    
+    res.status(201).json({ success: true, message: "Vente encaissée avec succès", documentId });
+
+  } catch (error: any) {
+    await db.query('ROLLBACK');
+    logger.error(error, `[REM CAISSE ERROR] Échec de la vente au détail.`);
+    res.status(500).json({ success: false, message: error.message || "Erreur lors du traitement de la vente." });
+  }
+};
+
+// ==========================================
 // 1. CRÉATION DE DOCUMENTS COMMERCIAUX (Strictement au selling_price)
 // ==========================================
 export const createSalesDocument = async (req: Request, res: Response): Promise<void> => {
@@ -35,7 +136,6 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
   const user = (req as any).user; 
   const companyId = company_id || user?.companyId;
 
-  // Log de départ pour vérifier ce que le front envoie au serveur
   logger.info({ type, companyId, userId: user?.id }, `[REM SALES] Début de création de document. Nombre d'articles: ${items?.length}`);
 
   try {
@@ -45,7 +145,6 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
     const computedItems = [];
 
     for (const item of items) {
-      // Récupération de l'ID peu importe le format (camelCase ou snake_case)
       const pid = item.product_id || item.productId;
 
       if (!pid) {
@@ -53,7 +152,6 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
         throw new Error("ID de produit manquant dans la requête");
       }
 
-      // Requête stricte sur la colonne selling_price
       const prodRes = await db.query(
         'SELECT id, selling_price, name FROM public.products WHERE id = $1 AND company_id = $2',
         [pid, companyId]
@@ -63,19 +161,11 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
 
       if (prodRes.rows.length > 0) {
         const dbProduct = prodRes.rows[0];
-        // On force la conversion en nombre au cas où le type SQL soit un string/numeric
         unitPrice = Number(dbProduct.selling_price);
-        
         logger.info(`[REM PRICING MATCH] Produit trouvé : "${dbProduct.name}" (${pid}). Application du selling_price BDD : ${unitPrice} $`);
       } else {
-        // Si la ligne du dessus ne renvoie rien, le serveur prenait la valeur du front (qui est le prix d'achat)
         const frontPrice = item.unit_price || item.unitPrice || 0;
-        
-        logger.warn(
-          `[REM PRICING WARNING] Produit ${pid} INTROUVABLE en BDD pour l'entreprise ${companyId}. ` +
-          `Le serveur est obligé de prendre le prix du front : ${frontPrice} $ (Vérifie l'ID du produit ou l'ID de l'entreprise)`
-        );
-        
+        logger.warn(`[REM PRICING WARNING] Produit ${pid} INTROUVABLE en BDD. Prix front appliqué.`);
         unitPrice = Number(frontPrice);
       }
 
@@ -91,7 +181,6 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
       });
     }
 
-    // Génération du numéro de document
     const prefix = type === 'QUOTE' ? 'DEVIS' : type === 'RESTOCK_REQUEST' ? 'RESTOCK' : 'FACT';
     const docNumber = `${prefix}-${Date.now().toString().slice(-6)}`;
 
@@ -102,11 +191,9 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
     `;
     
     const finalResellerId = user?.role === 'STAFF' ? user.id : (req.body.reseller_id || null);
-
     const docRes = await db.query(docQuery, [companyId, clientId || null, type, docNumber, status, totalAmount, finalResellerId]);
     const docId = docRes.rows[0].id;
 
-    // Insertion des lignes d'articles basées sur le selling_price validé
     for (const item of computedItems) {
       await db.query(
         'INSERT INTO document_items (document_id, product_id, quantity, unit_price, total_price) VALUES ($1, $2, $3, $4, $5)',
@@ -136,16 +223,9 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
   const { name, email, phone, address, company_id } = req.body;
   const companyId = company_id || (req as any).user?.companyId;
 
-  logger.info({ companyId, name, email }, '[REM CLIENTS] Tentative de création de client avec données complètes');
-
   if (!name || name.trim() === '') {
     res.status(400).json({ error: 'Le nom du client est obligatoire.' });
     return;
-  }
-
-  if (!companyId || companyId === 'bf30cd12-9c1d-4074-b4a0-000000000000') {
-     res.status(400).json({ error: 'ID entreprise manquant ou invalide.' });
-     return;
   }
 
   try {
@@ -155,24 +235,13 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
       RETURNING id, company_id, name, email, phone, address, created_at;
     `;
     
-    const clientValues = [companyId, name, email || null, phone || null, address || null];
-    const result = await db.query(clientQuery, clientValues);
-    const newClient = result.rows[0];
-
-    logger.info({ clientId: newClient.id, name: newClient.name }, '[REM CLIENTS SUCCESS] Profil complet du client créé en base.');
-
-    res.status(201).json({
-      message: 'Client créé avec succès',
-      client: newClient
-    });
+    const result = await db.query(clientQuery, [companyId, name, email || null, phone || null, address || null]);
+    res.status(201).json({ message: 'Client créé avec succès', client: result.rows[0] });
   } catch (error: any) {
-    logger.error(error, '[REM CLIENTS ERROR] Échec de la création du client');
-    
     if (error.code === '23505') {
        res.status(409).json({ error: 'Un client avec cet identifiant ou email existe déjà.' });
        return;
     }
-
     res.status(500).json({ error: 'Erreur fatale lors de la création du client.' });
   }
 };
@@ -183,121 +252,90 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
 export const updateDocumentStatus = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { status: newStatus, company_id } = req.body; 
-  
-  // 🛠️ FALLBACK SÉCURISÉ : Récupère l'ID du token OU du body OU de la query string
-  const companyId = (req as any).user?.companyId || company_id || req.query.company_id || req.query.companyId;
+  const user = (req as any).user; 
+  const companyId = user?.companyId || company_id || req.query.company_id;
 
-  logger.info({ documentId: id, newStatus, companyId }, "[REM SALES] Demande de changement de statut par l'administration");
-
-  const allowedStatuses = ['PAID', 'CANCELLED'];
-  if (!allowedStatuses.includes(newStatus)) {
-     res.status(400).json({ error: "Statut invalide. Choisissez uniquement parmi : PAID, CANCELLED" });
-     return;
-  }
-
-  if (!companyId) {
-    res.status(400).json({ error: "L'identifiant de l'entreprise (company_id) est introuvable." });
+  if (user?.role === 'STAFF') {
+    res.status(403).json({ success: false, error: "Action non autorisée. Seule l'administration peut modifier ce statut." });
     return;
   }
 
   try {
     await db.query('BEGIN');
 
-    // 1. Récupération de l'état actuel du document en base
-    const docQuery = `
-      SELECT status, reseller_id FROM documents WHERE id = $1 AND company_id = $2
-    `;
+    const docQuery = `SELECT type, status, reseller_id FROM documents WHERE id = $1 AND company_id = $2`;
     const docRes = await db.query(docQuery, [id, companyId]);
 
     if (docRes.rows.length === 0) {
       await db.query('ROLLBACK');
-      res.status(404).json({ error: 'Document introuvable ou non autorisé pour cette entreprise.' });
+      res.status(404).json({ error: 'Document introuvable.' });
       return;
     }
 
-    const { status: oldStatus, reseller_id: resellerId } = docRes.rows[0];
+    const { type, status: oldStatus, reseller_id: resellerId } = docRes.rows[0];
 
-    // Sécurité : Éviter de refaire la même opération si le statut est déjà identique
     if (oldStatus === newStatus) {
       await db.query('ROLLBACK');
-      res.status(400).json({ error: `Le document possède déjà le statut : ${newStatus}.` });
+      res.status(400).json({ error: 'Même statut demandé.' });
       return;
     }
 
-    // 2. Extraction des articles reliés au document pour la mise à jour des stocks
     const itemsQuery = `SELECT product_id, quantity FROM document_items WHERE document_id = $1`;
     const itemsRes = await db.query(itemsQuery, [id]);
 
-    // ==========================================
-    // LOGIQUE DE TRAITEMENT DES STOCKS
-    // ==========================================
-
-    // CAS A : Encaisser un brouillon (DRAFT -> PAID) ➔ On diminue les stocks
     if (oldStatus === 'DRAFT' && newStatus === 'PAID') {
-      for (const item of itemsRes.rows) {
-        if (!item.product_id) continue;
-        if (resellerId) {
-          // Si la commande appartient à un revendeur, on décrémente son stock magasin
-          await db.query(
-            `UPDATE public.reseller_stocks SET quantity = quantity - $1 WHERE reseller_id = $2 AND product_id = $3`,
-            [item.quantity, resellerId, item.product_id]
-          );
-        } else {
-          // Sinon, on décrémente le stock central de l'entreprise
-          await db.query(
-            `UPDATE public.products SET stock_quantity = stock_quantity - $1 WHERE id = $2 AND company_id = $3`,
-            [item.quantity, item.product_id, companyId]
-          );
+      if (type === 'RESTOCK_REQUEST') {
+        for (const item of itemsRes.rows) {
+          if (!item.product_id) continue;
+          await db.query(`UPDATE public.products SET stock_quantity = stock_quantity - $1 WHERE id = $2 AND company_id = $3`, [item.quantity, item.product_id, companyId]);
+          if (resellerId) {
+            await db.query(`
+              INSERT INTO public.reseller_stocks (reseller_id, product_id, quantity)
+              VALUES ($1, $2, $3) ON CONFLICT (reseller_id, product_id) 
+              DO UPDATE SET quantity = public.reseller_stocks.quantity + EXCLUDED.quantity
+            `, [resellerId, item.product_id, item.quantity]);
+          }
+        }
+      } else {
+        for (const item of itemsRes.rows) {
+          if (!item.product_id) continue;
+          if (resellerId) {
+            await db.query(`UPDATE public.reseller_stocks SET quantity = quantity - $1 WHERE reseller_id = $2 AND product_id = $3`, [item.quantity, resellerId, item.product_id]);
+          } else {
+            await db.query(`UPDATE public.products SET stock_quantity = stock_quantity - $1 WHERE id = $2 AND company_id = $3`, [item.quantity, item.product_id, companyId]);
+          }
         }
       }
-      logger.info(`[REM STOCK] Stocks décrémentés avec succès (DRAFT -> PAID) pour le document ${id}`);
     }
 
-    // CAS B : Annuler une facture déjà payée (PAID -> CANCELLED) ➔ On recrédite les stocks !
     else if (oldStatus === 'PAID' && newStatus === 'CANCELLED') {
-      for (const item of itemsRes.rows) {
-        if (!item.product_id) continue;
-        if (resellerId) {
-          await db.query(
-            `UPDATE public.reseller_stocks SET quantity = quantity + $1 WHERE reseller_id = $2 AND product_id = $3`,
-            [item.quantity, resellerId, item.product_id]
-          );
-        } else {
-          await db.query(
-            `UPDATE public.products SET stock_quantity = stock_quantity + $1 WHERE id = $2 AND company_id = $3`,
-            [item.quantity, item.product_id, companyId]
-          );
+      if (type === 'RESTOCK_REQUEST') {
+        for (const item of itemsRes.rows) {
+          if (!item.product_id) continue;
+          if (resellerId) {
+            await db.query(`UPDATE public.reseller_stocks SET quantity = quantity - $1 WHERE reseller_id = $2 AND product_id = $3`, [item.quantity, resellerId, item.product_id]);
+          }
+          await db.query(`UPDATE public.products SET stock_quantity = stock_quantity + $1 WHERE id = $2 AND company_id = $3`, [item.quantity, item.product_id, companyId]);
+        }
+      } else {
+        for (const item of itemsRes.rows) {
+          if (!item.product_id) continue;
+          if (resellerId) {
+            await db.query(`UPDATE public.reseller_stocks SET quantity = quantity + $1 WHERE reseller_id = $2 AND product_id = $3`, [item.quantity, resellerId, item.product_id]);
+          } else {
+            await db.query(`UPDATE public.products SET stock_quantity = stock_quantity + $1 WHERE id = $2 AND company_id = $3`, [item.quantity, item.product_id, companyId]);
+          }
         }
       }
-      logger.warn(`[REM STOCK RESTORATION] Facture payée annulée. Marchandises remises en stock pour le document ${id}`);
     }
 
-    // CAS C : Annuler un brouillon (DRAFT -> CANCELLED) ➔ Rien à faire sur les stocks
-    else if (oldStatus === 'DRAFT' && newStatus === 'CANCELLED') {
-      logger.info(`[REM STOCK] Aucun impact sur le stock (DRAFT -> CANCELLED) pour le document ${id}`);
-    }
-
-    // 3. Mise à jour finale du document
-    const updateQuery = `
-      UPDATE documents 
-      SET status = $1, updated_at = NOW() 
-      WHERE id = $2 AND company_id = $3
-      RETURNING id, number, status, total_amount, updated_at;
-    `;
-    const updateRes = await db.query(updateQuery, [newStatus, id, companyId]);
-
+    await db.query(`UPDATE documents SET status = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3`, [newStatus, id, companyId]);
     await db.query('COMMIT');
     
-    res.status(200).json({
-      success: true,
-      message: `Le document a bien été mis à jour vers le statut : ${newStatus}`,
-      document: updateRes.rows[0]
-    });
-
+    res.status(200).json({ success: true, message: "Document mis à jour avec succès" });
   } catch (error) {
     await db.query('ROLLBACK');
-    logger.error(error, "[REM SALES ERROR] Échec lors du changement de statut admin");
-    res.status(500).json({ error: 'Erreur fatale lors de la modification et de la régulation des stocks.' });
+    res.status(500).json({ error: 'Erreur lors du changement de statut.' });
   }
 };
 
@@ -308,60 +346,30 @@ export const syncOfflineDocument = async (req: Request, res: Response): Promise<
   const { id, type, number, status, totalAmount, items } = req.body;
   const companyId = (req as any).user?.companyId;
 
-  logger.info({ companyId, documentId: id, number }, '[REM SALES SYNC] Réception d\'un document et de ses articles');
-
-  if (!id || !type || !number || !status || totalAmount === undefined || !items || !Array.isArray(items)) {
-    res.status(400).json({ error: 'Champs de synchronisation ou tableau d\'articles obligatoires manquants.' });
-    return;
-  }
-
   try {
     await db.query('BEGIN');
 
     const syncDocQuery = `
       INSERT INTO documents (id, company_id, type, number, status, total_amount, created_at, updated_at)
       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE 
-      SET status = EXCLUDED.status, total_amount = EXCLUDED.total_amount, updated_at = NOW()
-      RETURNING id;
+      ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, total_amount = EXCLUDED.total_amount, updated_at = NOW();
     `;
     await db.query(syncDocQuery, [id, companyId, type, number, status, Number(totalAmount)]);
-
     await db.query('DELETE FROM document_items WHERE document_id = $1;', [id]);
 
     for (const item of items) {
-      const finalProductId = item.product_id || item.productId || null;
-      const itemQuery = `
+      const finalProductId = item.product_id || item.productId;
+      await db.query(`
         INSERT INTO document_items (document_id, product_id, quantity, unit_price, total_price)
         VALUES ($1, $2, $3, $4, $5);
-      `;
-      await db.query(itemQuery, [
-        id, 
-        finalProductId, 
-        item.quantity, 
-        item.unit_price || item.unitPrice || 0, 
-        item.total_price || item.totalPrice || 0
-      ]);
+      `, [id, finalProductId, item.quantity, item.unit_price || item.unitPrice || 0, item.total_price || item.totalPrice || 0]);
     }
 
     await db.query('COMMIT');
-    logger.info({ documentId: id, number }, '[REM SALES SYNC SUCCESS] Document et stocks synchronisés dans Neon');
-
-    res.status(201).json({
-      success: true,
-      message: 'Document de vente et stocks synchronisés avec succès',
-      documentId: id
-    });
-  } catch (error: any) {
+    res.status(201).json({ success: true, message: 'Synchronisé avec succès' });
+  } catch (error) {
     await db.query('ROLLBACK');
-    logger.error(error, '[REM SALES SYNC ERROR] Échec de la transaction de synchronisation');
-    
-    if (error.code === '23505') {
-      res.status(409).json({ error: 'Un document avec ce numéro ou cet identifiant existe déjà.' });
-      return;
-    }
-
-    res.status(500).json({ error: 'Erreur fatale lors de l\'écriture synchronisée en base.' });
+    res.status(500).json({ error: 'Erreur lors de la synchronisation.' });
   }
 };
 
@@ -370,8 +378,7 @@ export const syncOfflineDocument = async (req: Request, res: Response): Promise<
 // ==========================================
 export const getSalesDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
-    const companyId = req.query.company_id || req.query.companyId || (req as any).user?.companyId;
-
+    const companyId = req.query.company_id || (req as any).user?.companyId;
     if (!companyId) {
       res.status(400).json({ success: false, error: "Missing company identity" });
       return;
@@ -394,66 +401,32 @@ export const getSalesDocuments = async (req: Request, res: Response): Promise<vo
     }
 
     if (search) {
-      queryConditions += ` AND (d.number ILIKE $${paramIndex} OR c.name ILIKE $${paramIndex} OR r.name ILIKE $${paramIndex} OR r.deposit_name ILIKE $${paramIndex})`;
+      queryConditions += ` AND (d.number ILIKE $${paramIndex} OR c.name ILIKE $${paramIndex} OR r.name ILIKE $${paramIndex})`;
       queryParams.push(`%${search}%`);
       paramIndex++;
     }
 
     const dataQuery = `
-      SELECT 
-        d.id, 
-        d.number, 
-        d.type, 
-        d.status, 
-        d.total_amount, 
-        d.created_at, 
-        c.name as client_name,
-        r.name as reseller_name,
-        r.deposit_name as depot_name
+      SELECT d.id, d.number, d.type, d.status, d.total_amount, d.created_at, 
+             c.name as client_name, r.name as reseller_name, r.deposit_name as depot_name
       FROM documents d
       LEFT JOIN clients c ON d.client_id = c.id
       LEFT JOIN public.resellers r ON d.reseller_id = r.id
-      ${queryConditions}
-      ORDER BY d.created_at DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1};
+      ${queryConditions} ORDER BY d.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1};
     `;
-    const finalDataParams = [...queryParams, limit, offset];
-
-    const countQuery = `
-      SELECT COUNT(*) 
-      FROM documents d
-      LEFT JOIN clients c ON d.client_id = c.id
-      LEFT JOIN public.resellers r ON d.reseller_id = r.id
-      ${queryConditions};
-    `;
-
-    console.log(`[REM BACKEND] Exécution de la recherche paginée pour l'entreprise : ${companyId}`);
 
     const [dataResult, countResult] = await Promise.all([
-      db.query(dataQuery, finalDataParams),
-      db.query(countQuery, queryParams)
+      db.query(dataQuery, [...queryParams, limit, offset]),
+      db.query(`SELECT COUNT(*) FROM documents d LEFT JOIN clients c ON d.client_id = c.id LEFT JOIN public.resellers r ON d.reseller_id = r.id ${queryConditions};`, queryParams)
     ]);
 
     const totalItems = parseInt(countResult.rows[0].count) || 0;
-    const totalPages = Math.ceil(totalItems / limit);
-
     res.status(200).json({
       success: true,
       data: dataResult.rows,
-      meta: {
-        totalItems,
-        totalPages,
-        currentPage: page,
-        limit
-      }
+      meta: { totalItems, totalPages: Math.ceil(totalItems / limit), currentPage: page, limit }
     });
-
   } catch (error) {
-    console.error("❌ [BACKEND ERROR 500] Échec de l'extraction des ventes :", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Internal Server Error", 
-      details: error instanceof Error ? error.message : String(error)
-    });
+    res.status(500).json({ success: false, error: "Internal Server Error" });
   }
 };

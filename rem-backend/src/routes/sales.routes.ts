@@ -5,7 +5,8 @@ import {
   createClient, 
   updateDocumentStatus, 
   syncOfflineDocument,
-  getSalesDocuments, 
+  getSalesDocuments,
+  processRetailCheckout // 👈 Importation de la nouvelle méthode de caisse
 } from '../controllers/sales.controller';
 import { 
   getResellersLiveLocation, 
@@ -57,6 +58,13 @@ router.post('/documents', requireAuth, createSalesDocument);
  * @access  Protégé (Requiert une session active et un Token JWT valide)
  */
 router.post('/clients', requireAuth, createClient);
+
+/**
+ * @route   POST /api/sales/retail-checkout
+ * @desc    Encaissement direct et déduction de stock immédiate depuis la caisse QuickSale.vue
+ * @access  Protégé (Requiert une session active et un Token JWT valide)
+ */
+router.post('/retail-checkout', requireAuth, processRetailCheckout);
 
 /**
  * @route   PATCH /api/sales/documents/:id/status
