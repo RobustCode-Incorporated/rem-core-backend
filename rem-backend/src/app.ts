@@ -13,6 +13,7 @@ const app = express();
 // 🛡️ Configuration CORS stricte pour la production REM
 app.use(cors({
   origin: [
+    'https://rem-core-frontend.vercel.app',
     'https://rem-core-frontend-robust-codes-projects.vercel.app', // Ton URL de production Vercel
     'http://localhost:5173'                                       // Pour tes tests locaux avec Vite
   ], 
