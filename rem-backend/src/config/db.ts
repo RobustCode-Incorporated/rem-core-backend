@@ -19,7 +19,8 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  logger.error('[DATABASE] Erreur inattendue sur le pool de connexion', err);
+  // Correction Pino : L'objet d'erreur doit impérativement être le premier argument
+  logger.error(err, '[DATABASE] Erreur inattendue sur le pool de connexion');
 });
 
 export const db = {
@@ -27,6 +28,8 @@ export const db = {
     logger.info({ sql: text, params }, '[SQL EXECUTION]');
     return pool.query(text, params);
   },
+  // Exportation de la méthode connect pour supporter les transactions (ex: ventes/stocks)
+  connect: () => pool.connect(),
   // Ajout de la méthode de fermeture pour nettoyer les processus Jest
   end: () => {
     logger.info('[DATABASE] Fermeture du pool de connexion');
