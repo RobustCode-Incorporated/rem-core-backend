@@ -10,8 +10,12 @@ import analyticsRoutes from './routes/analytics.routes';
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
 
+// 🛡️ Configuration CORS stricte pour la production REM
 app.use(cors({
-  origin: true, 
+  origin: [
+    'https://rem-core-frontend-robust-codes-projects.vercel.app', // Ton URL de production Vercel
+    'http://localhost:5173'                                       // Pour tes tests locaux avec Vite
+  ], 
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key'],
   credentials: true,
@@ -27,12 +31,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // Aiguillage des modules applicatifs
-app.use('/api/sales', salesRouter); // Le point d'entrée inclut maintenant /resellers-location
+app.use('/api/sales', salesRouter); 
 app.use('/api/auth', authRouter);
 app.use('/api/resellers', resellerRouter); 
 app.use('/api/analytics', analyticsRoutes);
 
-// Récupération du catalogue (CORRIGÉ : Ajout de 'currency' dans le SELECT)
+// Récupération du catalogue
 app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
   const companyId = req.query.company_id as string;
   if (!companyId) { res.status(400).json({ error: 'Le paramètre company_id est obligatoire.' }); return; }
@@ -49,7 +53,7 @@ app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// Création d'un produit (INCLUS : Gestion de la monnaie)
+// Création d'un produit
 app.post('/api/products', async (req: Request, res: Response): Promise<void> => {
   const { name, purchasePrice, sellingPrice, stockQuantity, minStockAlert, currency, company_id } = req.body;
 
