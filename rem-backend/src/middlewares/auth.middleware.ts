@@ -22,7 +22,7 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   try {
     // Secret harmonisé avec le contrôleur
     const secret = process.env.JWT_SECRET || 'SuperSecretKeyREM2026!';
-    const decoded = jwt.verify(token, secret) as any;
+    const decoded = jwt.verify(token, secret as string) as any;
     
     // Extraction propre et typée du payload normalisé
     (req as AuthenticatedRequest).user = {
