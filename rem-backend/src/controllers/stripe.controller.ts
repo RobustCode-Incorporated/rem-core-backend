@@ -34,7 +34,6 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
     }
 
     // 🛡️ SÉCURITÉ : Si FRONTEND_URL est absent de Render, on utilise ton lien Vercel par défaut
-    // .replace(/\/$/, '') permet de retirer un éventuel slash final pour avoir des URLs propres
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
 
     const session = await stripe.checkout.sessions.create({
@@ -102,17 +101,18 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     const planType = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
-      // Sauvegarde du plan et de l'ID d'abonnement pour permettre une résiliation future
+      // 🎯 MODIFICATION ICI : Ajout de is_premium = true pour débloquer le frontend automatiquement
       await db.query(
         `UPDATE companies 
          SET plan_type = $1, 
              stripe_subscription_id = $2, 
+             is_premium = true,
              updated_at = NOW() 
          WHERE id = $3`,
         [planType, stripeSubscriptionId, companyId]
       );
 
-      logger.info(`[STRIPE] Compagnie ${companyId} synchronisée sur le plan : ${planType.toUpperCase()}`);
+      logger.info(`[STRIPE] Compagnie ${companyId} synchronisée sur le plan : ${planType.toUpperCase()} (is_premium passée à TRUE)`);
     } catch (error) {
       logger.error(error, `[STRIPE BDD ERROR] Erreur lors de l'upgrade de la compagnie ${companyId}`);
       res.status(500).send('Erreur interne BDD');
