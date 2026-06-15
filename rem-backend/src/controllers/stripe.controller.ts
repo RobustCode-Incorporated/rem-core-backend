@@ -33,6 +33,10 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       return;
     }
 
+    // 🛡️ SÉCURITÉ : Si FRONTEND_URL est absent de Render, on utilise ton lien Vercel par défaut
+    // .replace(/\/$/, '') permet de retirer un éventuel slash final pour avoir des URLs propres
+    const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
@@ -46,8 +50,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
         trial_period_days: 30,
       },
       
-      success_url: `${process.env.FRONTEND_URL}/dashboard?status=success`,
-      cancel_url: `${process.env.FRONTEND_URL}/billing?status=cancel`,
+      success_url: `${frontendBaseUrl}/dashboard?status=success`,
+      cancel_url: `${frontendBaseUrl}/billing?status=cancel`,
       metadata: { companyId: companyId.toString() },
     });
 
@@ -67,7 +71,6 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     return;
   }
 
-  // 💡 Changement de type vers any pour éviter le plantage tsc Namespace StripeConstructor sur Render
   let event: any;
 
   try {
@@ -81,7 +84,6 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
 
   // Si le paiement ou la période d'essai est validée
   if (event.type === 'checkout.session.completed') {
-    // 💡 Changement de type vers any ici également pour harmoniser la compilation
     const session = event.data.object as any;
 
     const companyId = session.client_reference_id;
