@@ -33,8 +33,10 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       return;
     }
 
-    // 🛡️ SÉCURITÉ : Si FRONTEND_URL est absent de Render, on utilise ton lien Vercel par défaut
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
+    
+    // Détermination du plan choisi pour le transmettre au frontend
+    const planType = PLAN_MAPPING[planPriceId] || 'entrée';
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -49,7 +51,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
         trial_period_days: 30,
       },
       
-      success_url: `${frontendBaseUrl}/dashboard?status=success`,
+      // 🎯 AJOUT ICI : On passe le plan choisi dans l'URL de redirection
+      success_url: `${frontendBaseUrl}/dashboard?status=success&chosen_plan=${planType}`,
       cancel_url: `${frontendBaseUrl}/billing?status=cancel`,
       metadata: { companyId: companyId.toString() },
     });
@@ -73,7 +76,6 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
   let event: any;
 
   try {
-    // Validation essentielle de l'origine de la requête via le RAW BODY
     event = stripe.webhooks.constructEvent(req.body, sig, ENDPOINT_SECRET);
   } catch (err: any) {
     logger.error(`[STRIPE WEBHOOK ERROR] Signature invalide : ${err.message}`);
@@ -81,14 +83,12 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     return;
   }
 
-  // Si le paiement ou la période d'essai est validée
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as any;
 
     const companyId = session.client_reference_id;
     const stripeSubscriptionId = session.subscription as string;
     
-    // Récupération dynamique du produit facturé
     const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
     const priceId = lineItems.data[0]?.price?.id;
 
@@ -101,7 +101,6 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     const planType = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
-      // 🎯 MODIFICATION ICI : Ajout de is_premium = true pour débloquer le frontend automatiquement
       await db.query(
         `UPDATE companies 
          SET plan_type = $1, 
@@ -112,7 +111,7 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
         [planType, stripeSubscriptionId, companyId]
       );
 
-      logger.info(`[STRIPE] Compagnie ${companyId} synchronisée sur le plan : ${planType.toUpperCase()} (is_premium passée à TRUE)`);
+      logger.info(`[STRIPE] Compagnie ${companyId} synchronisée sur le plan : ${planType.toUpperCase()} (is_premium: TRUE)`);
     } catch (error) {
       logger.error(error, `[STRIPE BDD ERROR] Erreur lors de l'upgrade de la compagnie ${companyId}`);
       res.status(500).send('Erreur interne BDD');
@@ -143,13 +142,11 @@ export const deleteCompanyAccount = async (req: Request, res: Response): Promise
       return;
     }
 
-    // Destruction de l'abonnement chez Stripe si existant
     if (stripe_subscription_id) {
       await stripe.subscriptions.cancel(stripe_subscription_id);
       logger.info({ stripe_subscription_id }, '[STRIPE] Abonnement résilié avec succès.');
     }
 
-    // Nettoyage complet en cascade dans Neon
     await db.query('DELETE FROM companies WHERE id = $1', [companyId]);
     logger.info({ companyId }, '[BDD] Espace REM entièrement nettoyé.');
 
