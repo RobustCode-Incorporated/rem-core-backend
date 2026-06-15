@@ -58,7 +58,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
   }
 };
 
-// 📡 2. Le fameux Webhook Stripe qui écoute 'checkout.session.completed'
+// 📡 2. Le Webhook Stripe qui écoute 'checkout.session.completed'
 export const handleStripeWebhook = async (req: Request, res: Response): Promise<void> => {
   const sig = req.headers['stripe-signature'];
 
@@ -67,7 +67,8 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     return;
   }
 
-  let event: Stripe.Event;
+  // 💡 Changement de type vers any pour éviter le plantage tsc Namespace StripeConstructor sur Render
+  let event: any;
 
   try {
     // Validation essentielle de l'origine de la requête via le RAW BODY
@@ -80,7 +81,8 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
 
   // Si le paiement ou la période d'essai est validée
   if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session;
+    // 💡 Changement de type vers any ici également pour harmoniser la compilation
+    const session = event.data.object as any;
 
     const companyId = session.client_reference_id;
     const stripeSubscriptionId = session.subscription as string;
