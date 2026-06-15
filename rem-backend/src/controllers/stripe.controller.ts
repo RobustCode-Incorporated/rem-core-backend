@@ -35,8 +35,11 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
     
-    // Détermination du plan choisi pour le transmettre au frontend
+    // Détermination du plan choisi
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
+    
+    // 🎯 CORRECTION : Encodage sécurisé de l'URL pour gérer l'accent 'é' (Non-ASCII)
+    const encodedPlanType = encodeURIComponent(planType);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -51,8 +54,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
         trial_period_days: 30,
       },
       
-      // 🎯 AJOUT ICI : On passe le plan choisi dans l'URL de redirection
-      success_url: `${frontendBaseUrl}/dashboard?status=success&chosen_plan=${planType}`,
+      // Utilisation de la variable encodée
+      success_url: `${frontendBaseUrl}/dashboard?status=success&chosen_plan=${encodedPlanType}`,
       cancel_url: `${frontendBaseUrl}/billing?status=cancel`,
       metadata: { companyId: companyId.toString() },
     });
