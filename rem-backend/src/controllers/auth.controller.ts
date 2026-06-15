@@ -57,7 +57,7 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
   }
 };
 
-// --- LOGIQUE MISE À JOUR : LOGIN GÉNÉRIQUE ---
+// --- LOGIQUE MISE À ZONE : LOGIN GÉNÉRIQUE ---
 export const loginUser = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
 
@@ -107,13 +107,44 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// --- NOUVELLE FONCTIONNALITÉ : CRÉATION COMPLÈTE RESELLER ---
+// --- ÉTAPE 6 : SÉCURISATION ET CRÉATION DU RESELLER AVEC FEATURE GATING ---
 export const createResellerWithAccess = async (req: Request, res: Response): Promise<void> => {
   const { companyId, firstName, lastName, email, password, phone, deposit_name } = req.body;
   
-  logger.info({ email }, '[AUTH] Création complète d un revendeur');
+  logger.info({ email, companyId }, '[AUTH] Interrogation des quotas avant création de revendeur');
 
   try {
+    // 1. Récupérer le plan actuel de l'entreprise
+    const companyQuery = await db.query('SELECT plan_type FROM companies WHERE id = $1', [companyId]);
+    if (companyQuery.rowCount === 0) {
+      res.status(404).json({ error: 'Entreprise introuvable.' });
+      return;
+    }
+    
+    const planType = companyQuery.rows[0].plan_type || 'entrée';
+
+    // 2. Compter le nombre actuel de revendeurs actifs pour cette entreprise
+    const countQuery = await db.query('SELECT COUNT(*)::int FROM resellers WHERE company_id = $1', [companyId]);
+    const currentResellerCount = countQuery.rows[0].count;
+
+    // 3. Définir et évaluer les barrières de limites du modèle SaaS
+    let allowedLimit = 3; // Seuil par défaut du plan 'entrée'
+    
+    if (planType === 'standard') {
+      allowedLimit = 10;
+    } else if (planType === 'pro' || planType === 'unlimited') {
+      allowedLimit = Infinity; // Aucune restriction
+    }
+
+    if (currentResellerCount >= allowedLimit) {
+      logger.warn({ companyId, planType, currentResellerCount }, '[SaaS LOCK] Seuil critique de revendeurs atteint.');
+      res.status(403).json({ 
+        error: `Votre plan '${planType.toUpperCase()}' est limité à ${allowedLimit} revendeurs au maximum. Veuillez mettre à niveau votre abonnement pour débloquer de nouveaux accès.` 
+      });
+      return;
+    }
+
+    // 4. Si les quotas sont respectés, procéder à la double écriture transactionnelle standard
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     await db.query('BEGIN');
@@ -131,6 +162,7 @@ export const createResellerWithAccess = async (req: Request, res: Response): Pro
     );
 
     await db.query('COMMIT');
+    logger.info({ email, companyId }, '[AUTH] Revendeur et accès utilisateur créés avec succès.');
 
     res.status(201).json({ message: 'Revendeur créé avec succès et accès généré.' });
   } catch (error) {

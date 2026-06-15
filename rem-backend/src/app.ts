@@ -7,6 +7,12 @@ import { authRouter } from './routes/auth.routes';
 import { resellerRouter } from './routes/reseller.routes';
 import analyticsRoutes from './routes/analytics.routes';
 
+// Import des contrôleurs Stripe
+import { createCheckoutSession, handleStripeWebhook, deleteCompanyAccount } from './controllers/stripe.controller';
+
+// Note : Pense à importer ton middleware d'authentification (ex: protect, verifyToken) 
+// pour sécuriser les routes checkout et suppression de compte. Ici, on illustre sans pour l'exemple.
+
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
 
@@ -14,16 +20,22 @@ const app = express();
 app.use(cors({
   origin: [
     'https://rem-core-frontend.vercel.app',
-    'https://rem-core-frontend-robust-codes-projects.vercel.app', // Ton URL de production Vercel
-    'http://localhost:5173'                                       // Pour tes tests locaux avec Vite
+    'https://rem-core-frontend-robust-codes-projects.vercel.app', 
+    'http://localhost:5173'                                       
   ], 
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'Stripe-Signature'],
   credentials: true,
   optionsSuccessStatus: 200
 }));
 
 app.options('*', cors());
+
+// 🔥 RÈGLE D'OR STRIPE : La route Webhook doit intercepter le RAW body.
+// Elle se place donc impérativement AVANT app.use(express.json())
+app.post('/payments/stripe-webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
+
+// Toutes les routes définies après cette ligne intercepteront du JSON standard
 app.use(express.json());
 
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -37,7 +49,12 @@ app.use('/api/auth', authRouter);
 app.use('/api/resellers', resellerRouter); 
 app.use('/api/analytics', analyticsRoutes);
 
-// Récupération du catalogue
+// 💳 Routes de Facturation & Abonnements Stripe
+// (Ajoute ton middleware d'authentification juste avant le contrôleur si nécessaire !)
+app.post('/api/stripe/checkout', createCheckoutSession);
+app.delete('/api/stripe/cancel-account', deleteCompanyAccount);
+
+// Récupération du catalogue produits
 app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
   const companyId = req.query.company_id as string;
   if (!companyId) { res.status(400).json({ error: 'Le paramètre company_id est obligatoire.' }); return; }
@@ -99,5 +116,5 @@ app.get('/health', async (req: Request, res: Response) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  logger.info(`Le REM Core tourne sur le port ${PORT}`);
+  logger.info(`Le REM Core tourne sur le port ${PORT} et écoute le Webhook Stripe.`);
 });
