@@ -10,8 +10,8 @@ import analyticsRoutes from './routes/analytics.routes';
 // Import des contrôleurs Stripe
 import { createCheckoutSession, handleStripeWebhook, deleteCompanyAccount } from './controllers/stripe.controller';
 
-// Note : Pense à importer ton middleware d'authentification (ex: protect, verifyToken) 
-// pour sécuriser les routes checkout et suppression de compte. Ici, on illustre sans pour l'exemple.
+// 🔐 IMPORT DE TON MIDDLEWARE D'AUTHENTIFICATION HARMONISÉ
+import { requireAuth } from './middlewares/auth.middleware'; 
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
@@ -49,10 +49,10 @@ app.use('/api/auth', authRouter);
 app.use('/api/resellers', resellerRouter); 
 app.use('/api/analytics', analyticsRoutes);
 
-// 💳 Routes de Facturation & Abonnements Stripe
-// (Ajoute ton middleware d'authentification juste avant le contrôleur si nécessaire !)
-app.post('/api/stripe/checkout', createCheckoutSession);
-app.delete('/api/stripe/cancel-account', deleteCompanyAccount);
+// 💳 Routes de Facturation & Abonnements Stripe sécurisées
+// L'injection de requireAuth permet d'alimenter correctement req.user pour le contrôleur !
+app.post('/api/stripe/checkout', requireAuth, createCheckoutSession);
+app.delete('/api/stripe/cancel-account', requireAuth, deleteCompanyAccount);
 
 // Récupération du catalogue produits
 app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
@@ -112,6 +112,15 @@ app.get('/health', async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({ status: 'DOWN', error: 'Database connection failed' });
   }
+});
+
+// 🛡️ GESTIONNAIRE D'ERREURS GLOBAL (Anti-fausses erreurs CORS)
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  logger.error(err, '❌ [CRASH INTERNE SERVEUR]');
+  res.status(500).json({ 
+    error: 'Une erreur interne est survenue sur le serveur.',
+    message: err.message 
+  });
 });
 
 const PORT = process.env.PORT || 3000;
