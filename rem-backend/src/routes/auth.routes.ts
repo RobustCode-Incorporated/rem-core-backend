@@ -29,18 +29,18 @@ router.get('/companies/:id', requireAuth, getCompanyById);
  * @access  Protégé
  */
 router.delete('/companies/danger-delete', requireAuth, async (req, res) => {
-  // Interconnexion ACID serverless friendly via un client dédié du pool
   const client = await db.connect();
 
   try {
-    const companyId = req.user?.companyId; 
+    // ✅ Correction ici : on cast req en 'any' pour éviter l'erreur TS2339
+    const companyId = (req as any).user?.companyId; 
 
     if (!companyId) {
       return res.status(400).json({ error: "Impossible d'identifier votre entreprise depuis la session." });
     }
 
-    // Début de la transaction sécurisée
     await client.query('BEGIN');
+    // ... le reste de ton code SQL brut reste identique
 
     // 1. Nettoyage de 'reseller_stocks' (Dépend de users et products)
     // On cible via les utilisateurs rattachés à cette PME
