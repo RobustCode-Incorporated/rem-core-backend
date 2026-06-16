@@ -11,7 +11,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'SuperSecretKeyREM2026!';
 
 // --- LOGIQUE INITIALE : ENREGISTREMENT ADMIN ---
 export const registerCompanyAndUser = async (req: Request, res: Response): Promise<void> => {
-  const { companyName, country, firstName, lastName, email, password } = req.body;
+  // 🎯 AJOUT : Extraction de 'currency' depuis le req.body
+  const { companyName, country, firstName, lastName, email, password, currency } = req.body;
   
   logger.info({ email }, '[AUTH] Tentative d inscription pour : ' + companyName);
 
@@ -26,10 +27,11 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
 
     await db.query('BEGIN');
 
-    // 🎯 AJOUT : Initialisation de la devise par défaut à USD lors de la création
+    // 🎯 AJOUT : Utilisation de la devise dynamique (avec USD en sécurité par défaut)
+    const selectedCurrency = currency || 'USD';
     const companyResult = await db.query(
       'INSERT INTO companies (name, country, currency) VALUES ($1, $2, $3) RETURNING id',
-      [companyName, country, 'USD']
+      [companyName, country, selectedCurrency]
     );
     const companyId = companyResult.rows[0].id;
 
@@ -42,7 +44,6 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
 
     const user = userResult.rows[0];
     
-    // Normalisation du payload : id au lieu de userId
     const token = jwt.sign(
       { id: user.id, companyId, role: user.role, email: user.email }, 
       JWT_SECRET, 
