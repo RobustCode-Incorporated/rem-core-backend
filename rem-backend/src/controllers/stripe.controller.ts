@@ -5,14 +5,12 @@ import pino from 'pino';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 
-// Initialisation de Stripe avec la version Dahlia validée sur ton dashboard
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-05-27.dahlia' as any,
 });
 
 const ENDPOINT_SECRET = process.env.STRIPE_WEBHOOK_SECRET!;
 
-// Mapping propre entre tes Price IDs Stripe et les types de plan en BDD
 const PLAN_MAPPING: Record<string, string> = {
   [process.env.STRIPE_PRICE_ENTREE!]: 'entrée',
   [process.env.STRIPE_PRICE_STANDARD!]: 'standard',
@@ -26,7 +24,6 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
   const { planPriceId } = req.body;
 
   try {
-    // Vérification si l'utilisateur a un accès illimité (Bypass CEO)
     const companyCheck = await db.query('SELECT plan_type FROM companies WHERE id = $1', [companyId]);
     if (companyCheck.rows[0]?.plan_type === 'unlimited') {
       res.status(400).json({ error: "Vous bénéficiez déjà d'un accès illimité administrateur." });
@@ -34,27 +31,17 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
     }
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
-    
-    // Détermination du plan choisi
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
-    
-    // 🎯 CORRECTION : Encodage sécurisé de l'URL pour gérer l'accent 'é' (Non-ASCII)
     const encodedPlanType = encodeURIComponent(planType);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
       mode: 'subscription',
-      
-      // Liaison indispensable pour que le webhook sache quelle entreprise a payé
       client_reference_id: companyId.toString(),
-      
-      // Configuration des 30 jours gratuits
       subscription_data: {
         trial_period_days: 30,
       },
-      
-      // Utilisation de la variable encodée
       success_url: `${frontendBaseUrl}/dashboard?status=success&chosen_plan=${encodedPlanType}`,
       cancel_url: `${frontendBaseUrl}/billing?status=cancel`,
       metadata: { companyId: companyId.toString() },
@@ -67,7 +54,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
   }
 };
 
-// 📡 2. Le Webhook Stripe qui écoute 'checkout.session.completed'
+// 📡 2. Le Webhook Stripe réajusté pour le cadeau PRO
 export const handleStripeWebhook = async (req: Request, res: Response): Promise<void> => {
   const sig = req.headers['stripe-signature'];
 
@@ -101,20 +88,29 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
       return;
     }
 
-    const planType = PLAN_MAPPING[priceId] || 'entrée';
+    // Récupération du plan réellement acheté
+    const chosenPlan = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
+      // 🎯 Récupération de la date exacte calculée par Stripe pour la fin de la période d'essai
+      const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+      const trialEndTimestamp = subscription.trial_end;
+      const trialEndsAt = trialEndTimestamp ? new Date(trialEndTimestamp * 1000) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      // Enregistrement : Le plan_type passe à 'pro' (cadeau), chosen_plan stocke sa future destination
       await db.query(
         `UPDATE companies 
-         SET plan_type = $1, 
+         SET plan_type = 'pro', 
+             chosen_plan = $1, 
              stripe_subscription_id = $2, 
              is_premium = true,
+             trial_ends_at = $3,
              updated_at = NOW() 
-         WHERE id = $3`,
-        [planType, stripeSubscriptionId, companyId]
+         WHERE id = $4`,
+        [chosenPlan, stripeSubscriptionId, trialEndsAt, companyId]
       );
 
-      logger.info(`[STRIPE] Compagnie ${companyId} synchronisée sur le plan : ${planType.toUpperCase()} (is_premium: TRUE)`);
+      logger.info(`[STRIPE GIFT] Compagnie ${companyId} configurée en mode Cadeau PRO. Fin de l'essai : ${trialEndsAt}. Plan final : ${chosenPlan.toUpperCase()}`);
     } catch (error) {
       logger.error(error, `[STRIPE BDD ERROR] Erreur lors de l'upgrade de la compagnie ${companyId}`);
       res.status(500).send('Erreur interne BDD');
@@ -125,7 +121,7 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
   res.status(200).json({ received: true });
 };
 
-// ❌ 3. Annulation Stripe + Suppression Définitive de la Base de Données
+// ❌ 3. Annulation Stripe + Suppression Définitive
 export const deleteCompanyAccount = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user;

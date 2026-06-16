@@ -186,3 +186,25 @@ export const createResellerWithAccess = async (req: Request, res: Response): Pro
     res.status(500).json({ error: 'Erreur lors de la création du revendeur.' });
   }
 };
+// --- AJOUT : RÉCUPÉRATION DES INFOS DE L'ENTREPRISE (ESSAI / PLAN) ---
+export const getCompanyById = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const companyQuery = await db.query(
+      'SELECT id, name, country, plan_type, chosen_plan, is_premium, currency, trial_ends_at FROM companies WHERE id = $1',
+      [id]
+    );
+
+    if (companyQuery.rowCount === 0) {
+      res.status(404).json({ error: 'Entreprise introuvable.' });
+      return;
+    }
+
+    // On renvoie directement l'objet de l'entreprise
+    res.status(200).json(companyQuery.rows[0]);
+  } catch (error) {
+    logger.error(error, '[COMPANY FETCH ERROR] Échec de la récupération des données de l\'entreprise');
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
