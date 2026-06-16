@@ -26,9 +26,10 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
 
     await db.query('BEGIN');
 
+    // 🎯 AJOUT : Initialisation de la devise par défaut à USD lors de la création
     const companyResult = await db.query(
-      'INSERT INTO companies (name, country) VALUES ($1, $2) RETURNING id',
-      [companyName, country]
+      'INSERT INTO companies (name, country, currency) VALUES ($1, $2, $3) RETURNING id',
+      [companyName, country, 'USD']
     );
     const companyId = companyResult.rows[0].id;
 
@@ -57,7 +58,7 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
   }
 };
 
-// --- LOGIQUE MISE À ZONE : LOGIN GÉNÉRIQUE ---
+// --- LOGIQUE MISE À JOUR : LOGIN GÉNÉRIQUE ---
 export const loginUser = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
 
@@ -75,6 +76,13 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
       res.status(401).json({ message: 'Identifiants incorrects.' });
       return;
     }
+
+    // 🎯 AJOUT CRUCIAL : Récupération des informations de la compagnie pour le Frontend
+    const companyResult = await db.query(
+      'SELECT plan_type, is_premium, currency FROM companies WHERE id = $1',
+      [user.company_id]
+    );
+    const companyData = companyResult.rows[0] || {};
 
     // Récupération de l'ID spécifique si c'est un revendeur
     let resellerId = null;
@@ -100,9 +108,16 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         firstName: user.first_name, 
         companyId: user.company_id, 
         role: user.role 
+      },
+      // 🎯 Injection de la compagnie dans la réponse pour débloquer le routeur Vue
+      company: {
+        plan_type: companyData.plan_type || 'entrée',
+        is_premium: companyData.is_premium || false,
+        currency: companyData.currency || 'USD'
       }
     });
   } catch (error) {
+    logger.error(error, '[AUTH ERROR] Échec lors du login');
     res.status(500).json({ message: 'Erreur serveur.' });
   }
 };
