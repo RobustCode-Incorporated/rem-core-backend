@@ -21,10 +21,10 @@ const PLAN_MAPPING: Record<string, string> = {
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user; 
-  let { planPriceId } = req.body; // 🔄 Changé 'const' en 'let' pour pouvoir réassigner la valeur
+  let { planPriceId } = req.body; // 🔄 Permet la réassignation si un ID obsolète arrive du front
 
-  // 🚨 INTERCEPTEUR DE SÉCURITÉ : Si le frontend envoie les anciens IDs hardcodés, 
-  // on les transmute immédiatement en tes vrais IDs Live configurés sur Render
+  // 🚨 INTERCEPTEUR DE SÉCURITÉ : Si le frontend transmet les anciens IDs de test,
+  // on bascule automatiquement sur les vrais IDs Live configurés sur Render
   if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') {
     planPriceId = process.env.STRIPE_PRICE_ENTREE!;
   } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') {
@@ -42,7 +42,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
     
-    // Maintenant que planPriceId est le bon, le PLAN_MAPPING fonctionnera aussi parfaitement !
+    // Le PLAN_MAPPING cible désormais le bon ID redressé
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
     const encodedPlanType = encodeURIComponent(planType);
 
@@ -50,6 +50,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
       mode: 'subscription',
+      allow_promotion_codes: true, // ✨ Active le champ de saisie du Code Promo (ex: WELCOME26) sur la page Stripe
       client_reference_id: companyId.toString(),
       subscription_data: {
         trial_period_days: 30,
@@ -104,12 +105,12 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     const chosenPlan = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
-      // 🎯 Récupération de la date exacte calculée par Stripe pour la fin de la période d'essai
+      // 🎯 Date de fin d'essai calculée par Stripe selon les paramètres de l'abonnement
       const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
       const trialEndTimestamp = subscription.trial_end;
       const trialEndsAt = trialEndTimestamp ? new Date(trialEndTimestamp * 1000) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      // Enregistrement : Le plan_type passe à 'pro' (cadeau), chosen_plan stocke sa future destination
+      // Le plan_type passe temporairement à 'pro' (cadeau), chosen_plan stocke la destination réelle après l'essai
       await db.query(
         `UPDATE companies 
          SET plan_type = 'pro', 
