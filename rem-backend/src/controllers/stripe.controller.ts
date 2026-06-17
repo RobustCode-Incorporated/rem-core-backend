@@ -21,7 +21,17 @@ const PLAN_MAPPING: Record<string, string> = {
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user; 
-  const { planPriceId } = req.body;
+  let { planPriceId } = req.body; // 🔄 Changé 'const' en 'let' pour pouvoir réassigner la valeur
+
+  // 🚨 INTERCEPTEUR DE SÉCURITÉ : Si le frontend envoie les anciens IDs hardcodés, 
+  // on les transmute immédiatement en tes vrais IDs Live configurés sur Render
+  if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') {
+    planPriceId = process.env.STRIPE_PRICE_ENTREE!;
+  } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') {
+    planPriceId = process.env.STRIPE_PRICE_STANDARD!;
+  } else if (planPriceId === 'price_1TibOoJLHjLUPZfxUmFSbuvL') {
+    planPriceId = process.env.STRIPE_PRICE_PRO!;
+  }
 
   try {
     const companyCheck = await db.query('SELECT plan_type FROM companies WHERE id = $1', [companyId]);
@@ -31,6 +41,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
     }
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
+    
+    // Maintenant que planPriceId est le bon, le PLAN_MAPPING fonctionnera aussi parfaitement !
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
     const encodedPlanType = encodeURIComponent(planType);
 
