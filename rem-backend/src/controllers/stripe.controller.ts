@@ -23,23 +23,14 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
   const { companyId } = req.user; 
   let { planPriceId } = req.body; // 🔄 Permet la réassignation si un ID obsolète arrive du front
 
-  // 💳 1. Création de la session d'essai 30 jours (Stripe Checkout)
-export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
-  // @ts-ignore
-  const { companyId } = req.user; 
-  let { planPriceId } = req.body; 
-
-  // 🔄 CORRECTION DE L'INVERSION : On inverse les variables d'environnement affectées
-  // pour redresser le croisement entre le frontend et Render/Stripe
-  if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') { 
-    // L'utilisateur a cliqué sur "Entrée" -> on lui attribue la variable qui contient le vrai ID Entrée
-    planPriceId = process.env.STRIPE_PRICE_STANDARD!; 
-  } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') { 
-    // L'utilisateur a cliqué sur "Standard" -> on lui attribue la variable qui contient le vrai ID Standard
-    planPriceId = process.env.STRIPE_PRICE_ENTREE!; 
-  } else if (planPriceId === 'price_1TibOoJLHjLUPZfxUmFSbuvL') { 
-    // Le plan Pro reste inchangé
-    planPriceId = process.env.STRIPE_PRICE_PRO!; 
+  // 🚨 INTERCEPTEUR DE SÉCURITÉ : Correction de l'inversion entre Entrée et Standard
+  // On inverse l'attribution des variables d'environnement pour aligner les cartes du frontend
+  if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') {
+    planPriceId = process.env.STRIPE_PRICE_STANDARD!; // Assigne la variable Standard quand le clic provient d'Entrée
+  } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') {
+    planPriceId = process.env.STRIPE_PRICE_ENTREE!;   // Assigne la variable Entrée quand le clic provient de Standard
+  } else if (planPriceId === 'price_1TibOoJLHjLUPZfxUmFSbuvL') {
+    planPriceId = process.env.STRIPE_PRICE_PRO!;
   }
 
   try {
@@ -51,7 +42,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
     
-    // Le PLAN_MAPPING se basera maintenant sur le bon ID redressé
+    // Le PLAN_MAPPING cible désormais le bon ID redressé
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
     const encodedPlanType = encodeURIComponent(planType);
 
@@ -59,7 +50,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
       mode: 'subscription',
-      allow_promotion_codes: true, // Toujours actif pour ton code WELCOME26 !
+      allow_promotion_codes: true, // ✨ Active le champ de saisie du Code Promo (ex: WELCOME26) sur la page Stripe
       client_reference_id: companyId.toString(),
       subscription_data: {
         trial_period_days: 30,
