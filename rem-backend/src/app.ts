@@ -33,8 +33,7 @@ app.options('*', cors());
 
 // 🔥 RÈGLE D'OR STRIPE : La route Webhook doit intercepter le RAW body.
 // Elle se place donc impérativement AVANT app.use(express.json())
-app.post('/payments/stripe-webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
-
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
 // Toutes les routes définies après cette ligne intercepteront du JSON standard
 app.use(express.json());
 
