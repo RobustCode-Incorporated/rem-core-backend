@@ -10,13 +10,13 @@ import analyticsRoutes from './routes/analytics.routes';
 // Import des contrôleurs Stripe
 import { createCheckoutSession, handleStripeWebhook, deleteCompanyAccount } from './controllers/stripe.controller';
 
-// 🔐 IMPORT DE TON MIDDLEWARE D'AUTHENTIFICATION HARMONISÉ
+// IMPORT MIDDLEWARE D'AUTHENTIFICATION HARMONISÉ
 import { requireAuth } from './middlewares/auth.middleware'; 
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
 
-// 🛡️ Configuration CORS stricte pour la production REM
+// Configuration CORS stricte pour la production REM
 app.use(cors({
   origin: [
     'https://rem-core-frontend.vercel.app',
@@ -31,7 +31,7 @@ app.use(cors({
 
 app.options('*', cors());
 
-// 🔥 RÈGLE D'OR STRIPE : La route Webhook doit intercepter le RAW body.
+// RÈGLE D'OR STRIPE : La route Webhook doit intercepter le RAW body.
 // Elle se place donc impérativement AVANT app.use(express.json())
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
 // Toutes les routes définies après cette ligne intercepteront du JSON standard
