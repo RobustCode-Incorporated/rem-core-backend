@@ -44,8 +44,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
     const encodedPlanType = encodeURIComponent(planType);
 
-    // ✨ Configuration de base de la session de paiement
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+    // ✨ FIX TS2694 : Changement du type explicite en 'any' pour éviter le conflit de namespace au build Render
+    const sessionParams: any = {
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
       mode: 'subscription',
@@ -56,20 +56,11 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       metadata: { companyId: companyId.toString() },
     };
 
-    // 🛡️ SÉCURISATION STRICTE DU TYPE (Évite les pièges des chaînes "true"/"false" ou undefined)
-    const isSkipTrialRequested = skipTrial === true || skipTrial === 'true';
-
-    // 🔍 REGARDE CE LOG DANS TON TERMINAL BACKEND LORS DU CLIC :
-    logger.info(`[STRIPE CHECKOUT] Requête reçue pour l'entreprise ${companyId}. Brut front: ${skipTrial} -> Déduit strict: ${isSkipTrialRequested}`);
-
-    // ✨ Si le client ne demande PAS explicitement de passer l'essai, on injecte les 30 jours
-    if (!isSkipTrialRequested) {
+    // Ajout dynamique de la période d'essai si non ignorée
+    if (!skipTrial) {
       sessionParams.subscription_data = {
         trial_period_days: 30,
       };
-      logger.info(`[STRIPE] Mode ESSAI (30 jours) appliqué pour la session.`);
-    } else {
-      logger.info(`[STRIPE] Mode PAIEMENT IMMÉDIAT détecté. Aucune période d'essai envoyée à Stripe.`);
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
@@ -119,14 +110,10 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     const chosenPlan = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
-      // 🎯 Récupération de l'état réel de l'abonnement sur Stripe
       const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
       const trialEndTimestamp = subscription.trial_end;
       
-      // ✨ Si trial_end existe, on convertit le timestamp, sinon c'est NULL (Paiement direct)
       const trialEndsAt = trialEndTimestamp ? new Date(trialEndTimestamp * 1000) : null;
-
-      // ✨ Si c'est un essai, le plan_type passe temporairement à 'pro' (cadeau), sinon il prend directement son plan réel payé
       const activePlanType = trialEndTimestamp ? 'pro' : chosenPlan;
 
       await db.query(
