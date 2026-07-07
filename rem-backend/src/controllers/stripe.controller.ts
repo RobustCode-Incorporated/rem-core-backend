@@ -17,18 +17,18 @@ const PLAN_MAPPING: Record<string, string> = {
   [process.env.STRIPE_PRICE_PRO!]: 'pro',
 };
 
-// 💳 1. Création de la session d'essai 30 jours (Stripe Checkout)
+// 💳 1. Création de la session d'essai ou de paiement direct (Stripe Checkout)
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user; 
-  let { planPriceId } = req.body; // 🔄 Permet la réassignation si un ID obsolète arrive du front
+  // ✨ On extrait optionnellement skipTrial depuis le corps de la requête front-end
+  let { planPriceId, skipTrial } = req.body; 
 
   // 🚨 INTERCEPTEUR DE SÉCURITÉ : Correction de l'inversion entre Entrée et Standard
-  // On inverse l'attribution des variables d'environnement pour aligner les cartes du frontend
   if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') {
-    planPriceId = process.env.STRIPE_PRICE_STANDARD!; // Assigne la variable Standard quand le clic provient d'Entrée
+    planPriceId = process.env.STRIPE_PRICE_STANDARD!; 
   } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') {
-    planPriceId = process.env.STRIPE_PRICE_ENTREE!;   // Assigne la variable Entrée quand le clic provient de Standard
+    planPriceId = process.env.STRIPE_PRICE_ENTREE!;   
   } else if (planPriceId === 'price_1TibOoJLHjLUPZfxUmFSbuvL') {
     planPriceId = process.env.STRIPE_PRICE_PRO!;
   }
@@ -42,23 +42,29 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://rem-core-frontend.vercel.app').replace(/\/$/, '');
     
-    // Le PLAN_MAPPING cible désormais le bon ID redressé
     const planType = PLAN_MAPPING[planPriceId] || 'entrée';
     const encodedPlanType = encodeURIComponent(planType);
 
-    const session = await stripe.checkout.sessions.create({
+    // ✨ Configuration de base de la session de paiement
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
       payment_method_types: ['card'],
       line_items: [{ price: planPriceId, quantity: 1 }],
       mode: 'subscription',
-      allow_promotion_codes: true, // ✨ Active le champ de saisie du Code Promo (ex: WELCOME26) sur la page Stripe
+      allow_promotion_codes: true, 
       client_reference_id: companyId.toString(),
-      subscription_data: {
-        trial_period_days: 30,
-      },
       success_url: `${frontendBaseUrl}/dashboard?status=success&chosen_plan=${encodedPlanType}`,
       cancel_url: `${frontendBaseUrl}/billing?status=cancel`,
       metadata: { companyId: companyId.toString() },
-    });
+    };
+
+    // ✨ Si le client ne demande PAS explicitement de passer l'essai, on injecte les 30 jours
+    if (!skipTrial) {
+      sessionParams.subscription_data = {
+        trial_period_days: 30,
+      };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     res.json({ url: session.url });
   } catch (error: any) {
@@ -67,7 +73,7 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
   }
 };
 
-// 📡 2. Le Webhook Stripe réajusté pour le cadeau PRO
+// 📡 2. Le Webhook Stripe réajusté de manière dynamique (Gestion Essai vs Paiement Immédiat)
 export const handleStripeWebhook = async (req: Request, res: Response): Promise<void> => {
   const sig = req.headers['stripe-signature'];
 
@@ -105,25 +111,34 @@ export const handleStripeWebhook = async (req: Request, res: Response): Promise<
     const chosenPlan = PLAN_MAPPING[priceId] || 'entrée';
 
     try {
-      // 🎯 Date de fin d'essai calculée par Stripe selon les paramètres de l'abonnement
+      // 🎯 Récupération de l'état réel de l'abonnement sur Stripe
       const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
       const trialEndTimestamp = subscription.trial_end;
-      const trialEndsAt = trialEndTimestamp ? new Date(trialEndTimestamp * 1000) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      
+      // ✨ Si trial_end existe, on convertit le timestamp, sinon c'est NULL (Paiement direct)
+      const trialEndsAt = trialEndTimestamp ? new Date(trialEndTimestamp * 1000) : null;
 
-      // Le plan_type passe temporairement à 'pro' (cadeau), chosen_plan stocke la destination réelle après l'essai
+      // ✨ Si c'est un essai, le plan_type passe temporairement à 'pro' (cadeau), sinon il prend directement son plan réel payé
+      const activePlanType = trialEndTimestamp ? 'pro' : chosenPlan;
+
       await db.query(
         `UPDATE companies 
-         SET plan_type = 'pro', 
-             chosen_plan = $1, 
-             stripe_subscription_id = $2, 
+         SET plan_type = $1, 
+             chosen_plan = $2, 
+             stripe_subscription_id = $3, 
              is_premium = true,
-             trial_ends_at = $3,
+             trial_ends_at = $4,
              updated_at = NOW() 
-         WHERE id = $4`,
-        [chosenPlan, stripeSubscriptionId, trialEndsAt, companyId]
+         WHERE id = $5`,
+        [activePlanType, chosenPlan, stripeSubscriptionId, trialEndsAt, companyId]
       );
 
-      logger.info(`[STRIPE GIFT] Compagnie ${companyId} configurée en mode Cadeau PRO. Fin de l'essai : ${trialEndsAt}. Plan final : ${chosenPlan.toUpperCase()}`);
+      if (trialEndTimestamp) {
+        logger.info(`[STRIPE GIFT] Compagnie ${companyId} configurée en mode Cadeau PRO. Fin de l'essai : ${trialEndsAt}. Plan final prévu : ${chosenPlan.toUpperCase()}`);
+      } else {
+        logger.info(`[STRIPE DIRECT] Compagnie ${companyId} activée DIRECTEMENT sur le plan : ${chosenPlan.toUpperCase()} (Paiement immédiat, aucun essai).`);
+      }
+      
     } catch (error) {
       logger.error(error, `[STRIPE BDD ERROR] Erreur lors de l'upgrade de la compagnie ${companyId}`);
       res.status(500).send('Erreur interne BDD');
