@@ -21,7 +21,6 @@ const PLAN_MAPPING: Record<string, string> = {
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user; 
-  // ✨ On extrait optionnellement skipTrial depuis le corps de la requête front-end
   let { planPriceId, skipTrial } = req.body; 
 
   // 🚨 INTERCEPTEUR DE SÉCURITÉ : Correction de l'inversion entre Entrée et Standard
@@ -57,11 +56,20 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       metadata: { companyId: companyId.toString() },
     };
 
+    // 🛡️ SÉCURISATION STRICTE DU TYPE (Évite les pièges des chaînes "true"/"false" ou undefined)
+    const isSkipTrialRequested = skipTrial === true || skipTrial === 'true';
+
+    // 🔍 REGARDE CE LOG DANS TON TERMINAL BACKEND LORS DU CLIC :
+    logger.info(`[STRIPE CHECKOUT] Requête reçue pour l'entreprise ${companyId}. Brut front: ${skipTrial} -> Déduit strict: ${isSkipTrialRequested}`);
+
     // ✨ Si le client ne demande PAS explicitement de passer l'essai, on injecte les 30 jours
-    if (!skipTrial) {
+    if (!isSkipTrialRequested) {
       sessionParams.subscription_data = {
         trial_period_days: 30,
       };
+      logger.info(`[STRIPE] Mode ESSAI (30 jours) appliqué pour la session.`);
+    } else {
+      logger.info(`[STRIPE] Mode PAIEMENT IMMÉDIAT détecté. Aucune période d'essai envoyée à Stripe.`);
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
