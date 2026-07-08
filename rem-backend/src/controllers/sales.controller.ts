@@ -380,6 +380,7 @@ export const getSalesDocuments = async (req: Request, res: Response): Promise<vo
   try {
     const user = (req as any).user; // Récupération de l'utilisateur connecté depuis le middleware
     const companyId = req.query.company_id || user?.companyId;
+    const all = req.query.all === 'true';
 
     if (!companyId) {
       res.status(400).json({ success: false, error: "Missing company identity" });
@@ -396,8 +397,16 @@ export const getSalesDocuments = async (req: Request, res: Response): Promise<vo
     let queryConditions = 'WHERE d.company_id = $1';
     const queryParams: any[] = [companyId];
     let paramIndex = 2;
+    let limit = parseInt(req.query.limit as string) || 15;
+    let offset = (parseInt(req.query.page as string) - 1 || 0) * limit;
+    
 
     // 2. ISOLATION CRITIQUE : Si c'est un revendeur, on force le filtrage par son ID
+    if (all) {
+      limit = 10000; 
+      offset = 0;
+    }
+
     if (user?.role === 'STAFF') {
       queryConditions += ` AND d.reseller_id = $${paramIndex}`;
       queryParams.push(user.id);
