@@ -378,7 +378,7 @@ export const syncOfflineDocument = async (req: Request, res: Response): Promise<
 // ==========================================
 export const getSalesDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
-    const user = (req as any).user; // Récupération de l'utilisateur connecté depuis le middleware
+    const user = (req as any).user; 
     const companyId = req.query.company_id || user?.companyId;
     const all = req.query.all === 'true';
 
@@ -387,9 +387,17 @@ export const getSalesDocuments = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    // On utilise `let` pour pouvoir écraser la pagination si all=true
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 15;
-    const offset = (page - 1) * limit;
+    let limit = parseInt(req.query.limit as string) || 15;
+    let offset = (page - 1) * limit;
+
+    // Surcharge de la limite si on veut tout charger pour le calcul de l'historique
+    if (all) {
+      limit = 10000; 
+      offset = 0;
+    }
+
     const search = (req.query.search as string) || '';
     const status = (req.query.status as string) || '';
 
@@ -397,16 +405,8 @@ export const getSalesDocuments = async (req: Request, res: Response): Promise<vo
     let queryConditions = 'WHERE d.company_id = $1';
     const queryParams: any[] = [companyId];
     let paramIndex = 2;
-    let limit = parseInt(req.query.limit as string) || 15;
-    let offset = (parseInt(req.query.page as string) - 1 || 0) * limit;
-    
 
     // 2. ISOLATION CRITIQUE : Si c'est un revendeur, on force le filtrage par son ID
-    if (all) {
-      limit = 10000; 
-      offset = 0;
-    }
-
     if (user?.role === 'STAFF') {
       queryConditions += ` AND d.reseller_id = $${paramIndex}`;
       queryParams.push(user.id);
