@@ -20,9 +20,10 @@ const app = express();
 app.use(cors({
   origin: [
     'https://rem-core-frontend.vercel.app',
-    'https://rem-core-frontend-robust-codes-projects.vercel.app', 
-    'http://localhost:5173'                                       
-  ], 
+    'https://rem-core-frontend-robust-codes-projects.vercel.app',
+    'https://erp.robust-code.com',
+    'http://localhost:5173'
+  ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'Stripe-Signature'],
   credentials: true,
