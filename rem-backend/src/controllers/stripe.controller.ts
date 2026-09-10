@@ -21,16 +21,7 @@ const PLAN_MAPPING: Record<string, string> = {
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   // @ts-ignore
   const { companyId } = req.user; 
-  let { planPriceId, skipTrial } = req.body; 
-
-  // 🚨 INTERCEPTEUR DE SÉCURITÉ : Correction de l'inversion entre Entrée et Standard
-  if (planPriceId === 'price_1TibLcJLHjLUPZfxOz4622dR') {
-    planPriceId = process.env.STRIPE_PRICE_STANDARD!; 
-  } else if (planPriceId === 'price_1TibG6JLHjLUPZfxYZfpGu8B') {
-    planPriceId = process.env.STRIPE_PRICE_ENTREE!;   
-  } else if (planPriceId === 'price_1TibOoJLHjLUPZfxUmFSbuvL') {
-    planPriceId = process.env.STRIPE_PRICE_PRO!;
-  }
+  const { planPriceId, skipTrial } = req.body;
 
   try {
     const companyCheck = await db.query('SELECT plan_type FROM companies WHERE id = $1', [companyId]);
