@@ -6,6 +6,7 @@ import { salesRouter } from './routes/sales.routes';
 import { authRouter } from './routes/auth.routes';
 import { resellerRouter } from './routes/reseller.routes';
 import analyticsRoutes from './routes/analytics.routes';
+import { routeRouter } from './routes/route.routes';
 
 // Import des contrôleurs Stripe
 import { createCheckoutSession, handleStripeWebhook, deleteCompanyAccount } from './controllers/stripe.controller';
@@ -46,8 +47,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Aiguillage des modules applicatifs
 app.use('/api/sales', salesRouter); 
 app.use('/api/auth', authRouter);
-app.use('/api/resellers', resellerRouter); 
+app.use('/api/resellers', resellerRouter);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/route', routeRouter); // Proxy OSRM pour les itinéraires logistiques (globe gods-eye-view)
 
 // 💳 Routes de Facturation & Abonnements Stripe sécurisées
 // L'injection de requireAuth permet d'alimenter correctement req.user pour le contrôleur !
