@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../config/jwt';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -20,9 +21,7 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   const token = authHeader.split(' ')[1];
 
   try {
-    // Secret harmonisé avec le contrôleur
-    const secret = process.env.JWT_SECRET || 'SuperSecretKeyREM2026!';
-    const decoded = jwt.verify(token, secret as string) as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as any;
     
     // Extraction propre et typée du payload normalisé
     (req as AuthenticatedRequest).user = {
