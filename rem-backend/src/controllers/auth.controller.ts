@@ -2,12 +2,11 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { db } from '../config/db';
+import { getJwtSecret } from '../config/jwt';
 import pino from 'pino';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const SALT_ROUNDS = 12;
-// Secret harmonisé avec le middleware
-const JWT_SECRET = process.env.JWT_SECRET || 'SuperSecretKeyREM2026!';
 
 // --- LOGIQUE INITIALE : ENREGISTREMENT ADMIN ---
 export const registerCompanyAndUser = async (req: Request, res: Response): Promise<void> => {
@@ -51,7 +50,7 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
     
     const token = jwt.sign(
       { id: user.id, companyId, role: user.role, email: user.email }, 
-      JWT_SECRET, 
+      getJwtSecret(), 
       { expiresIn: '90d' }
     );
 
@@ -102,7 +101,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     // Normalisation du payload : id au lieu de userId pour s'aligner avec le middleware
     const token = jwt.sign(
       { id: user.id, companyId: user.company_id, role: user.role, email: user.email },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '90d' }
     );
 

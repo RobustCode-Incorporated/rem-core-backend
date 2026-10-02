@@ -13,6 +13,7 @@ import { createCheckoutSession, handleStripeWebhook, deleteCompanyAccount } from
 
 // IMPORT MIDDLEWARE D'AUTHENTIFICATION HARMONISÉ
 import { requireAuth } from './middlewares/auth.middleware'; 
+import { getJwtSecret } from './config/jwt';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const app = express();
@@ -124,6 +125,9 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     message: err.message 
   });
 });
+
+// Fail at boot rather than on the first login, so a bad deploy never goes live.
+getJwtSecret();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
