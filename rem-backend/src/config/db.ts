@@ -25,7 +25,8 @@ pool.on('error', (err) => {
 
 export const db = {
   query: (text: string, params?: any[]) => {
-    logger.info({ sql: text, params }, '[SQL EXECUTION]');
+    // Parameters carry password hashes and personal data: log the statement only.
+    logger.info({ sql: text }, '[SQL EXECUTION]');
     return pool.query(text, params);
   },
   // Exportation de la méthode connect pour supporter les transactions (ex: ventes/stocks)

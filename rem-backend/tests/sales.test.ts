@@ -43,29 +43,32 @@ describe('📈 Suite de Tests TDD - Module REM Sales', () => {
     await db.end();
   });
 
-  it('RED -> GREEN: Devrait générer une facture avec ses lignes d articles associés', async () => {
-    // Simulation du retour Neon : Enregistrement du document (Invoice)
-    mockedDbQuery.mockResolvedValueOnce({
-      rows: [{ id: 'doc-12345', number: 'FAC-2026-001', total_amount: 150000 }],
-    } as any);
-
-    // Simulation du retour Neon : Enregistrement des lignes d'articles (Items)
-    mockedDbQuery.mockResolvedValueOnce({ rowCount: 2 } as any);
+  it('crée la facture dans l entreprise du jeton, même si la requête en désigne une autre', async () => {
+    mockedDbQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM public.products')) {
+        return { rows: [{ id: 'prod-1', selling_price: 50000, name: 'Ordinateur' }] } as any;
+      }
+      if (sql.includes('INSERT INTO documents')) return { rows: [{ id: 'doc-12345' }] } as any;
+      return { rows: [], rowCount: 1 } as any;
+    });
 
     const response = await request(app)
       .post('/api/sales/documents')
       .send({
         clientId: 'client-999',
         type: 'INVOICE',
-        items: [
-          { description: 'Ordinateur Portable', quantity: 1, unitPrice: 100000 },
-          { description: 'Souris Sans Fil', quantity: 2, unitPrice: 25000 },
-        ],
+        status: 'DRAFT',
+        company_id: 'another-company',
+        items: [{ productId: 'prod-1', quantity: 3 }],
       });
 
     expect(response.status).toBe(201);
-    expect(response.body).toHaveProperty('document');
-    expect(response.body.document).toHaveProperty('number');
-    expect(response.body.document.total_amount).toBe(150000);
+    const productLookup = mockedDbQuery.mock.calls.find(([sql]) => String(sql).includes('FROM public.products'));
+    expect(productLookup?.[1]).toEqual(['prod-1', 'bf30cd12-9c1d-4074-b4a0-000000000000']);
+    const insert = mockedDbQuery.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO documents'));
+    expect(insert?.[1]?.[0]).toBe('bf30cd12-9c1d-4074-b4a0-000000000000');
+    expect(insert?.[1]?.[5]).toBe(150000);
+    const allParams = mockedDbQuery.mock.calls.flatMap(([, params]) => (params as unknown[]) ?? []);
+    expect(allParams).not.toContain('another-company');
   });
 });

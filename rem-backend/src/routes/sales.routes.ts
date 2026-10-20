@@ -30,7 +30,7 @@ router.get('/resellers-location', requireAuth, getResellersLiveLocation);
  * @desc    Tableau de bord financier agrégé et analytique d'un revendeur ciblé (Performance Pro)
  * @access  Public / Dev (Idéal pour l'intégration de la Sidebar Frontend)
  */
-router.get('/resellers/:id/performance', getResellerPerformance);
+router.get('/resellers/:id/performance', requireAuth, getResellerPerformance);
 
 /**
  * @route   GET /api/sales/documents
@@ -93,7 +93,7 @@ router.put('/restock/validate/:id', requireAuth, validateRestock);
  * @desc    Mise à jour globale ou forçage du statut d'un document commercial
  * @access  Public / Back-office
  */
-router.put('/documents/:id', updateDocumentStatus);
+router.put('/documents/:id', requireAuth, updateDocumentStatus);
 
 /**
  * @route   PATCH /api/sales/resellers/:id/location

@@ -2,6 +2,10 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors'; 
 import pino from 'pino';
 import { db } from './config/db';
+import { jwtSecret } from './config/jwt';
+
+// Refuse to start without a real signing secret.
+jwtSecret();
 import { salesRouter } from './routes/sales.routes';
 import { authRouter } from './routes/auth.routes';
 import { resellerRouter } from './routes/reseller.routes';
@@ -57,9 +61,9 @@ app.post('/api/stripe/checkout', requireAuth, createCheckoutSession);
 app.delete('/api/stripe/cancel-account', requireAuth, deleteCompanyAccount);
 
 // Récupération du catalogue produits
-app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
-  const companyId = req.query.company_id as string;
-  if (!companyId) { res.status(400).json({ error: 'Le paramètre company_id est obligatoire.' }); return; }
+app.get('/api/products', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  // The company comes from the token only; a company_id in the query is ignored.
+  const companyId = (req as any).user.companyId as string;
 
   try {
     const result = await db.query(
@@ -74,8 +78,9 @@ app.get('/api/products', async (req: Request, res: Response): Promise<void> => {
 });
 
 // Création d'un produit
-app.post('/api/products', async (req: Request, res: Response): Promise<void> => {
-  const { name, purchasePrice, sellingPrice, stockQuantity, minStockAlert, currency, company_id } = req.body;
+app.post('/api/products', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const { name, purchasePrice, sellingPrice, stockQuantity, minStockAlert, currency } = req.body;
+  const company_id = (req as any).user.companyId as string;
 
   try {
     const result = await db.query(
@@ -91,9 +96,8 @@ app.post('/api/products', async (req: Request, res: Response): Promise<void> => 
 });
 
 // Récupération des ventes
-app.get('/api/sales', async (req: Request, res: Response): Promise<void> => {
-  const companyId = req.query.company_id as string;
-  if (!companyId) { res.status(400).json({ error: 'Le paramètre company_id est obligatoire.' }); return; }
+app.get('/api/sales', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const companyId = (req as any).user.companyId as string;
 
   try {
     const result = await db.query(

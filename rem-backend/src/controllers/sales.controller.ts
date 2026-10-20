@@ -132,9 +132,10 @@ export const processRetailCheckout = async (req: Request, res: Response): Promis
 // 1. CRÉATION DE DOCUMENTS COMMERCIAUX (Strictement au selling_price)
 // ==========================================
 export const createSalesDocument = async (req: Request, res: Response): Promise<void> => {
-  const { clientId, type, items, status, company_id } = req.body;
+  const { clientId, type, items, status } = req.body;
   const user = (req as any).user; 
-  const companyId = company_id || user?.companyId;
+  // The company comes from the token only.
+  const companyId = user?.companyId;
 
   logger.info({ type, companyId, userId: user?.id }, `[REM SALES] Début de création de document. Nombre d'articles: ${items?.length}`);
 
@@ -220,8 +221,8 @@ export const createSalesDocument = async (req: Request, res: Response): Promise<
 // 2. CRÉATION DE CLIENTS - AVEC ADRESSE
 // ==========================================
 export const createClient = async (req: Request, res: Response): Promise<void> => {
-  const { name, email, phone, address, company_id } = req.body;
-  const companyId = company_id || (req as any).user?.companyId;
+  const { name, email, phone, address } = req.body;
+  const companyId = (req as any).user?.companyId;
 
   if (!name || name.trim() === '') {
     res.status(400).json({ error: 'Le nom du client est obligatoire.' });
@@ -251,9 +252,9 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
 // ==========================================
 export const updateDocumentStatus = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const { status: newStatus, company_id } = req.body; 
+  const { status: newStatus } = req.body; 
   const user = (req as any).user; 
-  const companyId = user?.companyId || company_id || req.query.company_id;
+  const companyId = user?.companyId;
 
   if (user?.role === 'STAFF') {
     res.status(403).json({ success: false, error: "Action non autorisée. Seule l'administration peut modifier ce statut." });
@@ -379,7 +380,7 @@ export const syncOfflineDocument = async (req: Request, res: Response): Promise<
 export const getSalesDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as any).user; 
-    const companyId = req.query.company_id || user?.companyId;
+    const companyId = user?.companyId;
     const all = req.query.all === 'true';
 
     if (!companyId) {
