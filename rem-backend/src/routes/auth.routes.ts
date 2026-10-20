@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { registerCompanyAndUser, loginUser, getCompanyById } from '../controllers/auth.controller'; 
 import { requireAuth } from '../middlewares/auth.middleware'; 
+import { createFinanceHandoff } from '../controllers/finance.controller';
 import { db } from '../config/db'; // Instance de connexion SQL brut
 
 const router = Router();
@@ -22,6 +23,13 @@ router.post('/login', loginUser);
  * @access  Protégé
  */
 router.get('/companies/:id', requireAuth, getCompanyById); 
+
+/**
+ * @route   POST /api/auth/finance-handoff
+ * @desc    Lien d'une minute vers REM Finance, connecté dans la même entreprise
+ * @access  Protégé
+ */
+router.post('/finance-handoff', requireAuth, createFinanceHandoff);
 
 /**
  * @route   DELETE /api/auth/companies/danger-delete
