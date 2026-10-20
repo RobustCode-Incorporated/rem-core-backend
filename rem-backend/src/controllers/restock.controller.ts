@@ -9,9 +9,9 @@ const logger = pino({ transport: { target: 'pino-pretty' } });
  * @route   POST /api/restock/request
  */
 export const requestRestock = async (req: Request, res: Response): Promise<void> => {
-  const { items, company_id } = req.body;
+  const { items } = req.body;
   const user = (req as any).user;
-  const companyId = company_id || user?.companyId;
+  const companyId = user?.companyId;
 
   if (!items || items.length === 0) {
     res.status(400).json({ success: false, error: "Aucun produit sélectionné pour le réapprovisionnement." });
@@ -86,8 +86,8 @@ export const validateRestock = async (req: Request, res: Response): Promise<void
 
     // 1. Récupérer les informations du document, de l'entreprise et son statut actuel
     const doc = await db.query(
-      `SELECT reseller_id, company_id, status FROM public.documents WHERE id = $1 AND type = 'RESTOCK_REQUEST'`, 
-      [id]
+      `SELECT reseller_id, company_id, status FROM public.documents WHERE id = $1 AND type = 'RESTOCK_REQUEST' AND company_id = $2`, 
+      [id, (req as any).user?.companyId]
     );
     
     if (doc.rowCount === 0) {

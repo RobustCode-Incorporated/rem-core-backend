@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAuth } from '../middlewares/auth.middleware';
 import { AnalyticsController } from '../controllers/analytics.controller';
 import { AnalyticsRepository } from '../repositories/analytics.repository';
 // On importe tout le module de configuration de la DB
@@ -41,6 +42,6 @@ const repository = new AnalyticsRepository(pool);
 const controller = new AnalyticsController(repository);
 
 // Routage avec préservation du scope 'this'
-router.get('/products', (req, res) => controller.getProductAnalytics(req, res));
+router.get('/products', requireAuth, (req, res) => controller.getProductAnalytics(req, res));
 
 export default router;

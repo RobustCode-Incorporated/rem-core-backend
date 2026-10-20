@@ -6,7 +6,8 @@ export class AnalyticsController {
 
   getProductAnalytics = async (req: Request, res: Response) => {
     try {
-      const { company_id } = req.query;
+      // The company comes from the token only.
+      const company_id = (req as any).user?.companyId;
 
       if (!company_id) {
         return res.status(400).json({ success: false, error: "Company ID manquant" });

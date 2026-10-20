@@ -6,7 +6,13 @@ import bcrypt from 'bcrypt';
  * @desc    Création transactionnelle d'un revendeur et de ses accès
  */
 export const createResellerWithAccess = async (req: Request, res: Response): Promise<void> => {
-  const { firstName, lastName, email, password, phone, deposit_name, company_id } = req.body;
+  const { firstName, lastName, email, password, phone, deposit_name } = req.body;
+  // The company is the caller's own, from the token, never from the request.
+  const company_id = (req as any).user?.companyId;
+  if ((req as any).user?.role !== 'ADMIN') {
+    res.status(403).json({ success: false, message: "Seul un administrateur peut créer un revendeur." });
+    return;
+  }
 
   if (!firstName || !lastName || !email || !password || !company_id) {
     res.status(400).json({ success: false, message: "Champs obligatoires manquants." });
@@ -49,7 +55,7 @@ export const createResellerWithAccess = async (req: Request, res: Response): Pro
  * @desc    Extraction cartographique synchrone
  */
 export const getResellersLiveLocation = async (req: Request, res: Response): Promise<void> => {
-  const companyId = (req.query.company_id as string) || '943e411e-9c4c-484f-9dde-9db708f5159a';
+  const companyId = (req as any).user?.companyId;
   try {
     const result = await db.query(
       `SELECT id, name, email, phone, deposit_name, latitude, longitude 
@@ -77,9 +83,9 @@ export const updateResellerLocation = async (req: Request, res: Response): Promi
     const result = await db.query(
       `UPDATE public.resellers 
        SET latitude = $1, longitude = $2 
-       WHERE id = $3
+       WHERE id = $3 AND company_id = $4
        RETURNING id, name, deposit_name, latitude, longitude`,
-      [latitude, longitude, id]
+      [latitude, longitude, id, (req as any).user?.companyId]
     );
 
     // Si l'UUID n'existe pas dans la table
@@ -106,7 +112,7 @@ export const updateResellerLocation = async (req: Request, res: Response): Promi
  */
 export const getResellerPerformance = async (req: Request, res: Response): Promise<void> => {
   const resellerId = req.params.id;
-  const companyId = req.query.company_id as string;
+  const companyId = (req as any).user?.companyId;
   try {
     const resellerRes = await db.query(
       `SELECT id, name, deposit_name FROM public.resellers WHERE id = $1 AND company_id = $2`,

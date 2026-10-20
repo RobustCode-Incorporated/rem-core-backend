@@ -3,11 +3,10 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { db } from '../config/db';
 import pino from 'pino';
+import { jwtSecret } from '../config/jwt';
 
 const logger = pino({ transport: { target: 'pino-pretty' } });
 const SALT_ROUNDS = 12;
-// Secret harmonisé avec le middleware
-const JWT_SECRET = process.env.JWT_SECRET || 'SuperSecretKeyREM2026!';
 
 // --- LOGIQUE INITIALE : ENREGISTREMENT ADMIN ---
 export const registerCompanyAndUser = async (req: Request, res: Response): Promise<void> => {
@@ -51,7 +50,7 @@ export const registerCompanyAndUser = async (req: Request, res: Response): Promi
     
     const token = jwt.sign(
       { id: user.id, companyId, role: user.role, email: user.email }, 
-      JWT_SECRET, 
+      jwtSecret(), 
       { expiresIn: '90d' }
     );
 
@@ -102,7 +101,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     // Normalisation du payload : id au lieu de userId pour s'aligner avec le middleware
     const token = jwt.sign(
       { id: user.id, companyId: user.company_id, role: user.role, email: user.email },
-      JWT_SECRET,
+      jwtSecret(),
       { expiresIn: '90d' }
     );
 
@@ -130,7 +129,13 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
 
 // --- ÉTAPE 6 : SÉCURISATION ET CRÉATION DU RESELLER AVEC FEATURE GATING ---
 export const createResellerWithAccess = async (req: Request, res: Response): Promise<void> => {
-  const { companyId, firstName, lastName, email, password, phone, deposit_name } = req.body;
+  const { firstName, lastName, email, password, phone, deposit_name } = req.body;
+  // The company is the caller's own, from the token, never from the request.
+  const companyId = (req as any).user?.companyId;
+  if (!companyId || (req as any).user?.role !== 'ADMIN') {
+    res.status(403).json({ error: 'Seul un administrateur peut créer un revendeur.' });
+    return;
+  }
   
   logger.info({ email, companyId }, '[AUTH] Interrogation des quotas avant création de revendeur');
 
@@ -195,6 +200,11 @@ export const createResellerWithAccess = async (req: Request, res: Response): Pro
 // --- AJOUT : RÉCUPÉRATION DES INFOS DE L'ENTREPRISE (ESSAI / PLAN) ---
 export const getCompanyById = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
+  // A member reads only the company of their own token.
+  if (id !== (req as any).user?.companyId) {
+    res.status(404).json({ error: 'Entreprise introuvable.' });
+    return;
+  }
 
   try {
     const companyQuery = await db.query(
